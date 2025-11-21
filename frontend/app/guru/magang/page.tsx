@@ -15,8 +15,11 @@ import { CardStats } from "@/components/ui/CardStats";
 import { useState, useEffect } from "react";
 import { MagangDashboardData } from "@/types/dashboard";
 import { TambahMagangModal } from "@/components/layout/guru/create/TambahMagangModal";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function MagangPage() {
+useAuth();
+
     const [statsData, setStatsData] = useState<MagangDashboardData>({
         total_siswa: 0,
         aktif: 0,

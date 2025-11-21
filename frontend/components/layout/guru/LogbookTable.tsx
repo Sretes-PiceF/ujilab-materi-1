@@ -69,23 +69,20 @@ export function LogbookTable() {
         setCurrentPage(newPage);
     };
 
-    // Calculate page numbers to show
-    const getPageNumbers = () => {
-        const pages = [];
-        const maxPagesToShow = 5;
-        let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
-        let endpage = Math.min(meta.last_page, startPage + maxPagesToShow - 1);
-
-        if (endPage - startPage + 1 < maxPagesToShow) {
-            startPage = Math.max(1, endPage - maxPagesToShow + 1);
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            pages.push(i);
-        }
-
-        return pages;
-    };
+const getPageNumbers = () => {
+    const totalPages = meta.last_page || 1;
+    const maxPagesToShow = 5;
+    
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+    
+    // Adjust if we're near the end
+    if (endPage - startPage + 1 < maxPagesToShow) {
+        startPage = Math.max(1, endPage - maxPagesToShow + 1);
+    }
+    
+    return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+};
 
     if (error) {
         return (

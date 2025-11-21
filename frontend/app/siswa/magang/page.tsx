@@ -1,8 +1,9 @@
-// app/siswa/magang/page.tsx
-import { TopbarSiswa } from "@/components/layout/siswa/Topbar";
-import { GraduationCap, Building2, Calendar, CheckCircle, Star, User, MapPin } from "lucide-react";
+'use client'
+import { useAuth } from "@/hooks/useAuth";
+import { Building2, Calendar, CheckCircle, Star, User, MapPin } from "lucide-react";
 
 export default function MagangPage() {
+    useAuth();
     // Data dummy siswa & magang
     const studentData = {
         name: "Ahmad Rizki",

@@ -27,7 +27,7 @@ class Siswa extends Model
     }
 
     public function magang()
-{
-    return $this->hasMany(Magang::class, 'siswa_id');
-}
+    {
+        return $this->hasMany(Magang::class);
+    }
 }

@@ -16,10 +16,10 @@ class DashboardController extends Controller
         try {
             $totalSiswa = Siswa::count();
             $totalDudi = Dudi::count();
-            $totalMagang = Magang::where('status', 'selesai')->count();
+            $totalMagang = Magang::where('status', 'berlangsung')->count();
             $logbookHariIni = Logbook::whereDate('tanggal', Carbon::today())->count();
 
-                return response()->json([
+            return response()->json([
                 'success' => true,
                 'data' => [
                     'total_siswa' => $totalSiswa,
@@ -63,8 +63,9 @@ class DashboardController extends Controller
             'logbook_hari_ini' => $persenLogbookToday
         ]);
     }
-    
-    public function listDudi () {
+
+    public function listDudi()
+    {
         // Ambil DUDI hanya yang status = aktif + relasi magang
         $dudi = Dudi::with(['magang'])
             ->where('status', Dudi::STATUS_AKTIF)
@@ -80,8 +81,9 @@ class DashboardController extends Controller
         return response()->json($dudi);
     }
 
-    public function listMagang () {
-         // Ambil 5 data magang terbaru beserta relasi
+    public function listMagang()
+    {
+        // Ambil 5 data magang terbaru beserta relasi
         $magang = Magang::with(['siswa', 'dudi'])
             ->orderBy('created_at', 'desc')
             ->limit(5)

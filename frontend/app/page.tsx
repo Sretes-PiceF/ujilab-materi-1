@@ -22,43 +22,60 @@ export default function LoginPage() {
         try {
             const res = await authService.login(email, password);
 
-            // RAW DATA YANG BENAR
-            const api = res.data;
+            console.log("📡 RESPONSE FROM API:", res);
 
-            const user = api.user;
-            const token = api.token;
-
-            if (!user || !token) {
-                throw new Error("Response dari API tidak sesuai.");
+            if (!res.success) {
+                throw new Error(res.message || "Login tidak berhasil.");
             }
 
-            console.log("USER ROLE:", user.role);
+            // res.data = { user, token, token_type, siswa/guru/dudi }
+            const { user, token } = res.data;
 
-            // SIMPAN TOKEN DAN USER
+            if (!user || !token) {
+                throw new Error("Format API tidak sesuai. Cek console.");
+            }
+
+            console.log("✅ LOGIN SUCCESS");
+            console.log("USER:", user);
+            console.log("ROLE:", user.role);
+
+            // SIMPAN KE LOCALSTORAGE
             localStorage.setItem("access_token", token);
             localStorage.setItem("user", JSON.stringify(user));
 
-            document.cookie = `access_token=${token}; path=/;`;
+            // 🔥 FIX: ENCODE USER DATA UNTUK COOKIE
+            const encodedUser = encodeURIComponent(JSON.stringify(user));
 
-            // CEK ROLE
+            // SET COOKIE DENGAN BENAR
+            document.cookie = `access_token=${token}; path=/; max-age=86400; SameSite=Lax`;
+            document.cookie = `user_data=${encodedUser}; path=/; max-age=86400; SameSite=Lax`;
+
+            console.log("🍪 COOKIE SET:");
+            console.log("Token:", token.substring(0, 20) + "...");
+            console.log("User:", encodedUser.substring(0, 50) + "...");
+
+            // TUNGGU SEBENTAR AGAR COOKIE TER-SET
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // REDIRECT BERDASARKAN ROLE
             if (user.role === "guru") {
+                console.log("➡️ REDIRECT ke /guru/dashboard");
                 router.push("/guru/dashboard");
             } else if (user.role === "siswa") {
+                console.log("➡️ REDIRECT ke /siswa/dashboard");
                 router.push("/siswa/dashboard");
             } else {
+                console.log("➡️ REDIRECT ke /dashboard");
                 router.push("/dashboard");
             }
 
+            // FORCE REFRESH untuk trigger middleware
+            router.refresh();
+
         } catch (error: any) {
-
-            console.log("🛑 ERROR RAW:", error);
-            console.log("🛑 ERROR RES:", error.response);
-            console.log("🛑 ERROR DATA:", error.response?.data);
-            console.log("🛑 ERROR STATUS:", error.response?.status);
-
-            setErrorMsg("Login gagal, periksa kembali data Anda.");
-        }
-        finally {
+            console.error("❌ LOGIN ERROR:", error);
+            setErrorMsg(error.message || "Login gagal, periksa kembali email atau password.");
+        } finally {
             setLoading(false);
         }
     };
@@ -118,7 +135,7 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                            className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
                         >
                             {loading ? "Signing In..." : "Sign In"}
                         </button>
@@ -126,7 +143,7 @@ export default function LoginPage() {
 
                     <div className="text-center">
                         <p className="text-xs text-gray-500">
-                            Dont have an account?{" "}
+                            Don't have an account?{" "}
                             <Link href="/auth/Register" className="text-blue-600 hover:text-blue-800 font-medium">
                                 Sign up
                             </Link>

@@ -1,89 +1,40 @@
-// service/AuthService.ts
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL; // contoh: http://127.0.0.1:8000/api
-
-// Fungsi untuk mendapatkan token dari localStorage
-const getToken = (): string | null => {
-    if (typeof window !== "undefined") {
-        return localStorage.getItem("token");
-    }
-    return null;
-};
-
-// Interceptor untuk menambahkan token ke header secara otomatis
-axios.interceptors.request.use(
-    (config) => {
-        const token = getToken();
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    },
-    (error) => {
-        return Promise.reject(error);
-    }
-);
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export const authService = {
     login: async (email: string, password: string) => {
         try {
-            const res = await axios.post(`${API_URL}/login`, {
-                email,
-                password,
-            }, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
+            const response = await axios.post(
+                `${API_URL}/login`,
+                { email, password },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
                 }
-            });
+            );
 
-            // Simpan token setelah login berhasil
-            if (res.data.token && typeof window !== "undefined") {
-                localStorage.setItem("token", res.data.token);
+            // API Laravel mengembalikan: { success, message, data: { user, token, token_type, siswa/guru/dudi } }
+            console.log("📡 API RESPONSE:", response.data);
+
+            // Return response.data langsung karena sudah format yang benar
+            return response.data;
+
+        } catch (error: any) {
+            console.error("❌ API ERROR:", error.response?.data || error.message);
+            
+            // Jika error dari API (401, 422, dll)
+            if (error.response?.data) {
+                return error.response.data;
             }
 
-            return res.data; // contoh response: { token: "...", user: {...} }
-        } catch (error) {
-            throw error;
+            // Jika network error atau error lain
+            return {
+                success: false,
+                message: error.message || "Terjadi kesalahan saat login",
+            };
         }
     },
-
-    // Method untuk request yang membutuhkan auth
-    getProfile: async () => {
-        try {
-            const res = await axios.get(`${API_URL}/profile`);
-            return res.data;
-        } catch (error) {
-            throw error;
-        }
-    },
-
-    // Method untuk request lainnya yang membutuhkan auth
-    updateProfile: async (data: any) => {
-        try {
-            const res = await axios.put(`${API_URL}/profile`, data);
-            return res.data;
-        } catch (error) {
-            throw error;
-        }
-    },
-
-    // Logout - hapus token
-    logout: () => {
-        if (typeof window !== "undefined") {
-            localStorage.removeItem("token");
-        }
-    },
-
-    // Cek apakah user sudah login
-    isAuthenticated: (): boolean => {
-        if (typeof window !== "undefined") {
-            return !!localStorage.getItem("token");
-        }
-        return false;
-    },
-
-    // Get token (jika diperlukan)
-    getToken: getToken,
 };

@@ -8,8 +8,11 @@ import { TambahDudiModal } from "@/components/layout/guru/create/TambahDudiModal
 import { User, Building2, Plus, Building } from "lucide-react";
 import { useState, useEffect } from "react";
 import { DudiDashboardData } from "@/types/dashboard";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function DudiPage() {
+    useAuth();
+
     const [statsData, setStatsData] = useState<DudiDashboardData>({
         dudi_aktif: 0,
         siswa_magang_aktif: 0,

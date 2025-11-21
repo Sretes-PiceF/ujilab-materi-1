@@ -3,7 +3,6 @@
 import { DudiTable } from '@/components/layout/siswa/DudiTable';
 
 export default function DudiPage() {
-    // Handler untuk aksi-aksi DUDI
     const handleApply = (dudiId: number) => {
         console.log('Mendaftar ke DUDI dengan ID:', dudiId);
         // Implementasi logika pendaftaran

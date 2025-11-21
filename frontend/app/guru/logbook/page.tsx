@@ -9,6 +9,7 @@ import {
     Clock,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 // Interface untuk data stats logbook
 interface LogbookStatsData {
@@ -19,6 +20,8 @@ interface LogbookStatsData {
 }
 
 export default function LogBookPage() {
+useAuth();
+
     const [statsData, setStatsData] = useState<LogbookStatsData>({
         total_logbook: 0,
         belum_diverifikasi: 0,

@@ -283,12 +283,6 @@ export function MagangTable() {
                 {/* HEADER DENGAN TOMBOL TAMBAH */}
                 <div className="flex justify-between items-center mb-3">
                     <h1 className="text-2xl font-bold text-gray-800">Data Magang</h1>
-                    <button
-                        onClick={handleCreateMagang}
-                        className="px-4 py-2 bg-[#0097BB] text-white rounded-lg hover:bg-[#007b9e] transition-colors text-sm font-medium"
-                    >
-                        + Tambah Magang
-                    </button>
                 </div>
 
                 {/* BARIS PENCARIAN & FILTER */}
