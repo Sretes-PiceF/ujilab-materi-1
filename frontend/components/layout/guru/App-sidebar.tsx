@@ -3,14 +3,15 @@
 import {
     GraduationCap,
     Building2,
-    BookOpen
+    BookOpen,
+    LayoutDashboardIcon
 } from "lucide-react";
 import { SidebarNav } from "./Sidebar-nav";
 
 const navigationItems = [
     {
         title: "Dashboard",
-        icon: GraduationCap,
+        icon: LayoutDashboardIcon,
         href: "/guru/dashboard",
         description: "Ringkasan aktivitas",
     },

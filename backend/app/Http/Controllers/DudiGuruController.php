@@ -52,6 +52,42 @@ public function getAllDudi(Request $request)
     }
 }
 
+public function getDudiList()
+{
+    try {
+        // Ambil semua data DUDI dengan count siswa magang
+        $dudiList = Dudi::select([
+            'dudi.id',
+            'dudi.user_id',
+            'dudi.nama_perusahaan', 
+            'dudi.alamat',
+            'dudi.telepon',
+            'dudi.email', 
+            'dudi.penanggung_jawab',
+            'dudi.status',
+            'dudi.created_at',
+            'dudi.updated_at'
+        ])
+        ->withCount(['magang as total_siswa' => function($query) {
+            $query->where('status', 'berlangsung'); // Hanya hitung yang sedang magang
+        }])
+        ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $dudiList
+        ], 200);
+
+    } catch (\Throwable $th) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal mengambil data DUDI',
+            'error' => $th->getMessage()
+        ], 500);
+    }
+}
+
+
     /**
      * Get detail DUDI by ID (Guru bisa akses)
      */

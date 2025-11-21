@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Building2, MapPin, Phone, Mail, User } from 'lucide-react';
+import { Building2, MapPin, Phone, Mail, User } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
@@ -25,6 +25,7 @@ interface DudiFormData {
     telepon: string;
     email: string;
     penanggung_jawab: string;
+    status: 'aktif' | 'nonaktif' | 'pending'; // TAMBAHKAN STATUS
 }
 
 export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiModalProps) {
@@ -33,40 +34,68 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
         alamat: '',
         telepon: '',
         email: '',
-        penanggung_jawab: ''
+        penanggung_jawab: '',
+        status: 'aktif' // DEFAULT VALUE
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setFormData(prev => ({
             ...prev,
             [name]: value
         }));
+        // Clear field error when user starts typing
+        if (fieldErrors[name]) {
+            setFieldErrors(prev => ({
+                ...prev,
+                [name]: ''
+            }));
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        setFieldErrors({});
 
         try {
+            const token = localStorage.getItem('access_token');
             const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            const response = await fetch(`${API_URL}/guru/dudi`, {
+            
+            // PERBAIKI URL: tambahkan /api/
+            const response = await fetch(`${API_URL}/guru/create/dudi`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify(formData)
             });
 
-            if (!response.ok) {
-                throw new Error('Gagal menambahkan DUDI');
+            const result = await response.json();
+            console.log('API Response:', result); // Debug
+
+            if (response.status === 422) {
+                // Handle validation errors
+                if (result.errors) {
+                    const errors: Record<string, string> = {};
+                    Object.keys(result.errors).forEach(key => {
+                        errors[key] = result.errors[key][0]; // Ambil error pertama
+                    });
+                    setFieldErrors(errors);
+                    setError('Terdapat kesalahan dalam pengisian form');
+                    return;
+                }
             }
 
-            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.message || `HTTP error! status: ${response.status}`);
+            }
 
             if (result.success) {
                 // Reset form
@@ -75,7 +104,8 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                     alamat: '',
                     telepon: '',
                     email: '',
-                    penanggung_jawab: ''
+                    penanggung_jawab: '',
+                    status: 'aktif'
                 });
 
                 // Close modal
@@ -89,8 +119,8 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                 setError(result.message || 'Gagal menambahkan DUDI');
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
             console.error('Error adding DUDI:', err);
+            setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
         } finally {
             setLoading(false);
         }
@@ -102,17 +132,17 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
             alamat: '',
             telepon: '',
             email: '',
-            penanggung_jawab: ''
+            penanggung_jawab: '',
+            status: 'aktif'
         });
         setError(null);
+        setFieldErrors({});
         onOpenChange(false);
     };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent
-                className="sm:max-w-md bg-white border-0 shadow-2xl"
-            >
+            <DialogContent className="sm:max-w-md bg-white border-0 shadow-2xl">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-xl">
                         <Building2 className="h-5 w-5 text-[#0097BB]" />
@@ -121,7 +151,7 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
-                    {error && (
+                    {error && !Object.keys(fieldErrors).length && (
                         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
                             {error}
                         </div>
@@ -143,6 +173,9 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             disabled={loading}
                             className="bg-white"
                         />
+                        {fieldErrors.nama_perusahaan && (
+                            <p className="text-red-500 text-xs">{fieldErrors.nama_perusahaan}</p>
+                        )}
                     </div>
 
                     {/* Alamat */}
@@ -162,6 +195,9 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             disabled={loading}
                             className="resize-none bg-white"
                         />
+                        {fieldErrors.alamat && (
+                            <p className="text-red-500 text-xs">{fieldErrors.alamat}</p>
+                        )}
                     </div>
 
                     {/* Telepon */}
@@ -176,11 +212,14 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             type="tel"
                             value={formData.telepon}
                             onChange={handleChange}
-                            placeholder="Contoh: 021-12345678"
+                            placeholder="Contoh: 021-12345678 atau 081234567890"
                             required
                             disabled={loading}
                             className="bg-white"
                         />
+                        {fieldErrors.telepon && (
+                            <p className="text-red-500 text-xs">{fieldErrors.telepon}</p>
+                        )}
                     </div>
 
                     {/* Email */}
@@ -200,6 +239,9 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             disabled={loading}
                             className="bg-white"
                         />
+                        {fieldErrors.email && (
+                            <p className="text-red-500 text-xs">{fieldErrors.email}</p>
+                        )}
                     </div>
 
                     {/* Penanggung Jawab */}
@@ -218,6 +260,31 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             disabled={loading}
                             className="bg-white"
                         />
+                        {fieldErrors.penanggung_jawab && (
+                            <p className="text-red-500 text-xs">{fieldErrors.penanggung_jawab}</p>
+                        )}
+                    </div>
+
+                    {/* Status */}
+                    <div className="space-y-2">
+                        <Label htmlFor="status" className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                            Status
+                        </Label>
+                        <select
+                            id="status"
+                            name="status"
+                            value={formData.status}
+                            onChange={handleChange}
+                            disabled={loading}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0097BB] focus:border-transparent bg-white"
+                        >
+                            <option value="aktif">Aktif</option>
+                            <option value="nonaktif">Nonaktif</option>
+                            <option value="pending">Pending</option>
+                        </select>
+                        {fieldErrors.status && (
+                            <p className="text-red-500 text-xs">{fieldErrors.status}</p>
+                        )}
                     </div>
 
                     {/* Action Buttons */}
@@ -232,7 +299,7 @@ export function TambahDudiModal({ open, onOpenChange, onSuccess }: TambahDudiMod
                             Batal
                         </Button>
                         <Button
-                            type="button"
+                            type="submit"
                             onClick={handleSubmit}
                             disabled={loading}
                             className="flex-1 bg-[#0097BB] hover:bg-[#007b9e]"

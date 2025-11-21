@@ -61,4 +61,5 @@ class Magang extends Model
     {
         return $this->hasMany(Logbook::class);
     }
+    
 }

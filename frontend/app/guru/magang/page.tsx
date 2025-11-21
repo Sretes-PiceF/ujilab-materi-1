@@ -29,6 +29,7 @@ export default function MagangPage() {
     const fetchMagangStats = async () => {
         try {
             setLoading(true);
+            const token = localStorage.getItem('access_token');
 
             // Sesuaikan dengan route backend untuk data magang
             const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -36,6 +37,7 @@ export default function MagangPage() {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
                 },
             });
 

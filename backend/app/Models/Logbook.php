@@ -8,9 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 class Logbook extends Model
 {
     use HasFactory;
+
     protected $table = 'logbook';
-    public $timestamps = true;
-    
 
     protected $fillable = [
         'magang_id',
@@ -20,26 +19,62 @@ class Logbook extends Model
         'file',
         'status_verifikasi',
         'catatan_guru',
-        'catatan_dudi'
+        'catatan_dudi',
     ];
 
-    // ENUM values dari database
-    const STATUS_PENDING = 'pending';
-    const STATUS_DISETUJUI = 'disetujui';
-    const STATUS_DITOLAK = 'ditolak';
+    protected $casts = [
+        'tanggal' => 'date',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
 
-    public static function getStatuses()
-    {
-        return [
-            self::STATUS_PENDING,
-            self::STATUS_DISETUJUI,
-            self::STATUS_DITOLAK,
-        ];
-    }
-
-    // Relationship dengan magang
+    /**
+     * Relasi ke tabel magang
+     */
     public function magang()
     {
-        return $this->belongsTo(Magang::class);
+        return $this->belongsTo(Magang::class, 'magang_id');
+    }
+
+    /**
+     * Accessor untuk mendapatkan data siswa melalui magang
+     */
+    public function getSiswaAttribute()
+    {
+        return $this->magang?->siswa;
+    }
+
+    /**
+     * Accessor untuk mendapatkan data DUDI melalui magang
+     */
+    public function getDudiAttribute()
+    {
+        return $this->magang?->dudi;
+    }
+
+    /**
+     * Scope untuk filter berdasarkan status verifikasi
+     */
+    public function scopeByStatus($query, $status)
+    {
+        if ($status && $status !== 'all') {
+            return $query->where('status_verifikasi', $status);
+        }
+        return $query;
+    }
+
+    /**
+     * Scope untuk pencarian
+     */
+    public function scopeSearch($query, $search)
+    {
+        if ($search) {
+            return $query->whereHas('magang.siswa', function ($q) use ($search) {
+                $q->where('nama', 'ILIKE', "%{$search}%");
+            })
+            ->orWhere('kegiatan', 'ILIKE', "%{$search}%")
+            ->orWhere('kendala', 'ILIKE', "%{$search}%");
+        }
+        return $query;
     }
 }
