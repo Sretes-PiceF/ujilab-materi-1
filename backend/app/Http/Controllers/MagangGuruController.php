@@ -16,44 +16,44 @@ use Illuminate\Support\Facades\Validator;
 
 class MagangGuruController extends Controller
 {
-    public function getAllMagang ()
+    public function getAllMagang()
     {
         try {
-        // TOTAL SISWA MAGANG - semua siswa yang pernah magang
-        $totalSiswa = Magang::distinct('siswa_id')->count('siswa_id');
-        
-        // SISWA DENGAN STATUS MAGANG AKTIF (berlangsung)
-        $siswaAktif = Magang::where('status', 'berlangsung')->count();
-        
-        // SISWA DENGAN STATUS MAGANG SELESAI
-        $siswaSelesai = Magang::where('status', 'selesai')->count();
-        
-        // SISWA DENGAN STATUS PENDING (menunggu penempatan)
-        $siswaPending = Magang::where('status', 'pending')->count();
+            // TOTAL SISWA MAGANG - semua siswa yang pernah magang
+            $totalSiswa = Magang::distinct('siswa_id')->count('siswa_id');
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'total_siswa' => $totalSiswa,
-                'aktif' => $siswaAktif,
-                'selesai' => $siswaSelesai,
-                'pending' => $siswaPending
-            ]
-        ], 200);
-    } catch (\Throwable $th) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal mengambil data dashboard magang',
-            'error' => $th->getMessage()
-        ], 500);
-    }
+            // SISWA DENGAN STATUS MAGANG AKTIF (berlangsung)
+            $siswaAktif = Magang::where('status', 'berlangsung')->count();
+
+            // SISWA DENGAN STATUS MAGANG SELESAI
+            $siswaSelesai = Magang::where('status', 'selesai')->count();
+
+            // SISWA DENGAN STATUS PENDING (menunggu penempatan)
+            $siswaPending = Magang::where('status', 'pending')->count();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total_siswa' => $totalSiswa,
+                    'aktif' => $siswaAktif,
+                    'selesai' => $siswaSelesai,
+                    'pending' => $siswaPending
+                ]
+            ], 200);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data dashboard magang',
+                'error' => $th->getMessage()
+            ], 500);
+        }
     }
 
-   // MagangGuruController.php
- public function createMagang(Request $request)
+    // MagangGuruController.php
+    public function createMagang(Request $request)
     {
         DB::beginTransaction();
-        
+
         try {
             Log::info('Data received for magang creation:', $request->all());
 
@@ -61,7 +61,7 @@ class MagangGuruController extends Controller
             $validator = Validator::make($request->all(), [
                 // Data siswa (pilih dari dropdown)
                 'siswa_id' => 'required|exists:siswa,id',
-                
+
                 // Data magang
                 'dudi_id' => 'required|exists:dudi,id',
                 'tanggal_mulai' => 'required|date',
@@ -137,10 +137,9 @@ class MagangGuruController extends Controller
                 'message' => 'Data magang berhasil dibuat',
                 'data' => $magang
             ], 201);
-
         } catch (\Throwable $th) {
             DB::rollBack();
-            
+
             Log::error('Error creating magang:', [
                 'error' => $th->getMessage(),
                 'trace' => $th->getTraceAsString()
@@ -154,7 +153,7 @@ class MagangGuruController extends Controller
     }
 
 
- public function getMagangList(Request $request)
+    public function getMagangList(Request $request)
     {
         try {
             // Query data magang
@@ -167,7 +166,6 @@ class MagangGuruController extends Controller
                 'data' => $magang,
                 'message' => 'Data magang berhasil diambil'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -176,23 +174,24 @@ class MagangGuruController extends Controller
         }
     }
 
-      public function getSiswaList()
+    public function getSiswaList()
     {
         try {
-            $siswa = Siswa::with(['user']) // Sesuaikan dengan relasi Anda
+            $siswa = Siswa::with(['user']) // Include relasi user
                 ->select('id', 'user_id', 'nama', 'nis', 'kelas', 'jurusan', 'telepon', 'alamat')
                 ->orderBy('nama')
                 ->get()
                 ->map(function ($siswa) {
                     return [
                         'id' => $siswa->id,
+                        'user_id' => $siswa->user_id,
                         'nama' => $siswa->nama,
                         'nis' => $siswa->nis,
                         'kelas' => $siswa->kelas,
                         'jurusan' => $siswa->jurusan,
                         'telepon' => $siswa->telepon,
                         'alamat' => $siswa->alamat,
-                        'email' => $siswa->user->email ?? null
+                        'email' => $siswa->user->email ?? null // ✅ TAMBAHKAN INI!
                     ];
                 });
 
@@ -200,7 +199,6 @@ class MagangGuruController extends Controller
                 'success' => true,
                 'data' => $siswa
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -325,10 +323,9 @@ class MagangGuruController extends Controller
                 'message' => 'Data magang berhasil diupdate',
                 'data' => $magang
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan server',
@@ -337,8 +334,9 @@ class MagangGuruController extends Controller
         }
     }
 
-    public function deleteMagang($id) {
-    try {
+    public function deleteMagang($id)
+    {
+        try {
             DB::beginTransaction();
 
             // Cari magang
@@ -371,10 +369,9 @@ class MagangGuruController extends Controller
                 'success' => true,
                 'message' => 'Data magang berhasil dihapus'
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan server',

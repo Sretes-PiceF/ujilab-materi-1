@@ -18,6 +18,7 @@ export interface Magang {
         kelas: string;
         jurusan: string;
         telepon: string;
+        user_id: number;
         email: string;
     };
     dudi?: {

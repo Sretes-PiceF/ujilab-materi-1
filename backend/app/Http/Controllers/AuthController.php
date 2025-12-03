@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
@@ -23,10 +24,28 @@ class AuthController extends Controller
             'kelas' => 'required|string|max:50',
             'jurusan' => 'required|string|max:100',
             'alamat' => 'nullable|string',
-            'telepon' => 'nullable|string|max:15'
+            'telepon' => 'nullable|string|max:15',
+            'recaptcha_token' => 'required'
         ]);
 
+
         DB::beginTransaction();
+
+        $captchaVerify = Http::asForm()->post(
+            'https://www.google.com/recaptcha/api/siteverify',
+            [
+                'secret' => env('RECAPTCHA_SECRET_KEY'),
+                'response' => $request->recaptcha_token,
+                'remoteip' => $request->ip()
+            ]
+        );
+
+        if (!($captchaVerify->json()['success'] ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Captcha tidak valid atau sudah expired.'
+            ], 400);
+        }
 
         try {
             // Create user
@@ -112,10 +131,11 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
-        // Validasi input
+        // Validasi input dasar
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
-            'password' => 'required'
+            'password' => 'required',
+            'recaptcha_token' => 'required'
         ]);
 
         if ($validator->fails()) {
@@ -126,30 +146,42 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Coba login
+        // 🚀 Validasi reCAPTCHA ke Google
+        $captchaVerify = Http::asForm()->post(
+            'https://www.google.com/recaptcha/api/siteverify',
+            [
+                'secret' => env('RECAPTCHA_SECRET_KEY'),
+                'response' => $request->recaptcha_token,
+                'remoteip' => $request->ip()
+            ]
+        );
+
+        if (!($captchaVerify->json()['success'] ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Captcha tidak valid atau sudah expired.'
+            ], 400);
+        }
+
+        // 🚀 Lanjut proses login
         if (Auth::attempt($request->only('email', 'password'))) {
             $user = Auth::user();
 
-            // Hapus hanya token lama untuk device yang sama (optional)
-            // Atau biarkan multiple devices login
-            // $user->tokens()->where('name', 'auth_token')->delete();
-
-            // Buat token baru
+            // Generate token Sanctum
             $token = $user->createToken('auth_token')->plainTextToken;
 
-            // Response data berdasarkan role
             $responseData = [
                 'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
+                    'id'    => $user->id,
+                    'name'  => $user->name,
                     'email' => $user->email,
-                    'role' => $user->role
+                    'role'  => $user->role
                 ],
                 'token' => $token,
                 'token_type' => 'Bearer'
             ];
 
-            // Tambahkan data spesifik berdasarkan role
+            // Tambahan data relasi (opsional)
             if ($user->isSiswa() && $user->siswa) {
                 $responseData['siswa'] = $user->siswa;
             } elseif ($user->isGuru() && $user->guru) {
@@ -160,16 +192,18 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Login successful',
+                'message' => 'Login berhasil',
                 'data' => $responseData
-            ]);
+            ], 200);
         }
 
         return response()->json([
             'success' => false,
-            'message' => 'Mohon check email dan password anda!'
+            'message' => 'Email atau password salah!'
         ], 401);
     }
+
+
 
     /**
      * Logout user

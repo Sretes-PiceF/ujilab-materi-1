@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Calendar, FileText, Upload, User, Building2, CheckCircle, XCircle, Clock } from 'lucide-react';
+import Image from 'next/image';
 
 interface Siswa {
     id: string;
@@ -457,7 +458,7 @@ export function LogbookUpdateModal({
                                             </div>
                                         </div>
                                     ) : (
-                                        <img 
+                                        <Image
                                             src={previewFile} 
                                             alt="Preview" 
                                             className="max-h-48 mx-auto rounded-lg"

@@ -20,6 +20,14 @@ class Siswa extends Model
         'telepon'
     ];
 
+    // ✅ TAMBAHKAN INI - Accessor untuk email
+    protected $appends = ['email'];
+
+    public function getEmailAttribute()
+    {
+        return $this->user->email ?? null;
+    }
+
     // Relationship dengan user
     public function user()
     {

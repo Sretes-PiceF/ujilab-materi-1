@@ -24,7 +24,7 @@ interface DudiModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSave: (data: DudiFormData) => Promise<boolean>;
-    dudi?: Dudi | null;
+    dudi?: Dudi | any;
     title: string;
 }
 

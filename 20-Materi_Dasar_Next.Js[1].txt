@@ -1,0 +1,274 @@
+# Urutan Materi Next.js (Revisi Profesional & Terstruktur)
+
+Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling lanjut**, dan dibuat **lebih profesional**, **berkesinambungan**, serta cocok untuk siswa SMK. Tidak ada lompatan materi.
+
+---
+
+## **1. Pengenalan Next.js & Setup Proyek**
+
+* Apa itu Next.js & kelebihannya
+* Struktur folder (`app/`, `layout.tsx`, `page.tsx`)
+* Instalasi Next.js + Tailwind CSS
+* Menjalankan proyek pertama
+======================================
+		Selesai
+======================================
+
+
+---
+
+## **2. Penanganan Responsive Layout**
+
+* Konsep mobile-first
+* Penggunaan Flex, Grid, Container
+* Responsive breakpoints Tailwind
+* Membuat layout dasar (navbar, sidebar, footer)
+=======================================
+		Target
+=======================================
+
+
+
+---
+
+## **3. Responsivitas Gambar & Video**
+
+* Penggunaan `next/image`
+* Lazy loading otomatis
+* Mengatur ukuran, aspect ratio
+* Embed video responsif (YouTube, local)
+
+======================================
+		OTW
+======================================
+
+
+---
+
+## **4. Validasi Data / Form Validation Dasar**
+
+* Validasi required, email pattern
+* Menampilkan pesan error
+* Form login/register sederhana (tanpa backend dulu)
+
+======================================
+		Selesai
+======================================
+
+
+---
+
+## **5. Pemasangan reCAPTCHA (Login, Register, Forgot Password)**
+
+* Apa itu reCAPTCHA (v2/v3)
+* Integrasi widget di frontend
+* Validasi token via API Route
+* Menampilkan error jika captcha belum dicentang
+
+============================================
+	Selesai *Tinggal Forgot PW*
+============================================
+
+
+---
+
+## **6. Pagination Standar**
+
+* Konsep page, limit
+* Query string `?page=1`
+* Tombol Next & Previous
+* Penanganan loading saat berpindah halaman
+
+======================================
+		Selesai
+======================================
+
+
+---
+
+## **7. Infinite Scroll (Level Mudah)**
+
+* Apa itu infinite scroll
+* Intersection Observer
+* Trigger load lebih banyak data
+* Skeleton loading saat load data berikutnya
+
+=======================================
+		Selesai
+=======================================
+
+
+---
+
+## **8. Skeleton Loading**
+
+* Fungsi skeleton untuk UX
+* Membuat card/list skeleton
+* Menghubungkan skeleton dengan loading state fetch
+
+========================================
+		Selesai
+========================================
+
+
+---
+
+## **9. Kompres Foto Sebelum Upload (Client-side)**
+
+* Mengapa foto HP terlalu besar
+* Kompres otomatis sebelum upload (browser)
+* Preview hasil kompres
+
+---
+
+## **10. Resize Gambar (Thumbnail) via API Route**
+
+* Menggunakan Sharp di server
+* Menghasilkan versi kecil (thumbnail)
+* Menyimpan gambar asli + thumbnail
+
+---
+
+## **11. Kompresi Gambar menjadi WebP**
+
+* Konversi JPG/PNG → WebP
+* Manfaat WebP untuk performa
+* Fallback untuk browser lama
+
+=======================================================
+	Ini untuk Logbook{OTW UDAH 40%}
+=======================================================
+
+
+---
+
+## **12. Generate QR Code Dinamis**
+
+* Membuat QR dari ID/data
+* Menampilkan QR code di halaman
+* Tombol download QR
+* Cara scan QR untuk menuju detail data
+
+===========================================
+	Ini untuk Data magang Siswa
+===========================================
+
+---
+
+## **13. SPA (Single Page Application) Feel di Next.js**
+
+* Client Component & navigasi tanpa reload
+* `useState` dan `useEffect`
+* State management sederhana
+
+===========================================================
+	Selesai Ini diterapkan di guru dan siswa
+===========================================================
+
+
+
+---
+
+## **14. PWA (Progressive Web App) Dasar**
+
+* Apa itu PWA
+* Manifest.json
+* Installable app (Add to Home Screen)
+* Offline caching sederhana
+* Background service untuk push notif
+
+========================================
+		OTW
+========================================
+
+
+---
+
+## **15. Penanganan Peta / Map (Level Mudah)**
+
+* Menggunakan React-Leaflet
+* Menampilkan peta dasar
+* Menambahkan marker
+* Menampilkan posisi user (GPS)
+
+---
+
+## **16. Realtime Database (Supabase Realtime)**
+
+* Konsep realtime
+* Listen event insert/update/delete
+* Contoh live status / komentar
+
+
+---
+
+## **17. Push Notification (Dasar)**
+
+* Apa itu push notification web
+* Permission browser
+* Service worker dasar
+* Mengirim notifikasi dari server (Supabase)
+* Notifikasi interaktif (punya tombol aksi)
+
+---
+
+## **18. Dashboard Analitik**
+
+1. Grafik (Bar, Line, Pie)
+2. Full-screen panel
+3. Filter tanggal:
+
+   * Today, Yesterday, Last 7 Days, Last 30 Days
+   * This Month, Last Month
+   * This Year, Last Year, All
+4. Auto-refresh countdown
+5. Link bantuan per halaman
+
+---
+
+## **19. Teknik Pencarian & Filter**
+
+* Text search (nama, ID, kategori)
+* Filter kategori, tanggal, status
+* Debounce input agar tidak berat
+
+---
+
+## **20. Penyimpanan Data di Browser & Optimasi Frontend**
+
+1. **Image Sprite**
+
+   * Konsep sprite sheet
+   * Mengurangi banyak request HTTP
+   * Cara menggunakan sprite di Next.js
+
+2. **Local Storage & Session Storage** (digabung)
+
+   * Perbedaan local vs session
+   * Menyimpan data JSON
+   * Cara membaca, menulis, dan menghapus data
+   * Contoh: menyimpan tema, filter, preferensi user
+
+3. **Database Browser** (IndexedDB, SQLite via VxDB)
+
+   * Apa itu IndexedDB
+   * Cara menyimpan data offline
+   * Konsep mini database di browser
+   * Penyimpanan cache untuk PWA
+
+4. **Membuat Komponen UI yang Reusable**
+
+   * Button, Card, Input, Modal
+   * Konsep reuse vs duplicate
+   * Folder structure untuk komponen
+
+---
+
+# **Catatan**
+
+Materi telah disusun ulang agar:
+
+* Berurutan dari paling dasar → advanced
+* Tidak ada lompatan konsep
+* Cocok untuk siswa SMK yang baru masuk Next.js
+* Mendukung pembelajaran harian atau per modul

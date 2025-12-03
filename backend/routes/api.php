@@ -46,6 +46,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('dudi/{id}', [DudiSiswaController::class, 'show']);
             Route::post('dudi/{dudi_id}/daftar', [DudiSiswaController::class, 'store']);
 
+            //Route statistic
+            Route::get('/statistik', [DashboardController::class, 'getStatistikSiswa']);
 
             Route::get('/magang', [MagangSiswaController::class, 'getMagangSiswa']);
         });

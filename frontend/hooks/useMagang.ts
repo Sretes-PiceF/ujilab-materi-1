@@ -9,20 +9,24 @@ export interface Magang {
   dudi_id: number;
   guru_id: number;
   status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
-  nilai_akhir?: number;
+  nilai_akhir?: number | null;
   tanggal_mulai: string;
   tanggal_selesai: string;
   created_at: string;
   updated_at: string;
+  
   siswa?: {
     id: number;
+    user_id: number;
     nama: string;
     nis: string;
     kelas: string;
     jurusan: string;
     telepon: string;
     alamat: string;
+    email: string; // Email sudah di-map dari backend
   };
+  
   dudi?: {
     id: number;
     nama_perusahaan: string;
@@ -30,6 +34,7 @@ export interface Magang {
     telepon: string;
     penanggung_jawab: string;
   };
+  
   guru?: {
     id: number;
     nama: string;
@@ -43,7 +48,7 @@ export interface MagangFormData {
   tanggal_mulai: string;
   tanggal_selesai: string;
   status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
-  nilai_akhir?: number;
+  nilai_akhir?: number | null;
 }
 
 export interface Siswa {
@@ -54,7 +59,7 @@ export interface Siswa {
   jurusan: string;
   telepon: string;
   alamat: string;
-  email: string;
+  email: string; // Email sudah di-map dari backend
 }
 
 export interface Dudi {
@@ -63,6 +68,7 @@ export interface Dudi {
   alamat: string;
   telepon: string;
   penanggung_jawab: string;
+  email?: string;
 }
 
 export const useMagang = () => {
@@ -107,6 +113,12 @@ export const useMagang = () => {
       const result = await response.json();
       
       if (result.success) {
+        // Debug: Log untuk melihat data yang diterima
+        console.log('📦 Data Magang dari API:', result.data);
+        if (result.data.length > 0) {
+          console.log('📧 Sample Email:', result.data[0].siswa?.email);
+        }
+        
         setMagangList(result.data);
       } else {
         throw new Error(result.message || 'Failed to fetch magang data');
@@ -248,6 +260,12 @@ export const useMagang = () => {
       const result = await response.json();
 
       if (result.success) {
+        // Debug: Log untuk melihat data siswa
+        console.log('📦 Data Siswa dari API:', result.data);
+        if (result.data.length > 0) {
+          console.log('📧 Sample Siswa Email:', result.data[0].email);
+        }
+        
         setSiswaList(result.data);
         return result.data;
       } else {
@@ -284,7 +302,6 @@ export const useMagang = () => {
       return [];
     }
   };
-
 
   // Refresh semua data
   const refreshAll = async () => {

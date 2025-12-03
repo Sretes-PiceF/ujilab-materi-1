@@ -20,6 +20,13 @@ class Logbook extends Model
         'status_verifikasi',
         'catatan_guru',
         'catatan_dudi',
+        'original_image',
+        'thumbnail',
+        'webp_image',
+        'webp_thumbnail',
+        'original_size',
+        'optimized_size',
+        'image_format',
     ];
 
     protected $casts = [
@@ -27,6 +34,48 @@ class Logbook extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    public function getImageUrlAttribute()
+    {
+        // Prioritize webp for modern browsers
+        if ($this->webp_image && request()->header('Accept') && str_contains(request()->header('Accept'), 'image/webp')) {
+            return asset('storage/' . $this->webp_image);
+        }
+
+        // Fallback to original image
+        if ($this->original_image) {
+            return asset('storage/' . $this->original_image);
+        }
+
+        // Legacy support
+        return $this->file ? asset('storage/' . $this->file) : null;
+    }
+
+    // Add accessors for image URLs
+    public function getOriginalImageUrlAttribute()
+    {
+        if ($this->original_image) {
+            return asset('storage/' . $this->original_image);
+        }
+        return $this->file ? asset('storage/' . $this->file) : null;
+    }
+
+    public function getThumbnailUrlAttribute()
+    {
+        if ($this->thumbnail) {
+            return asset('storage/' . $this->thumbnail);
+        }
+        return $this->getImageUrlAttribute();
+    }
+
+    public function getWebpImageUrlAttribute()
+    {
+        if ($this->webp_image) {
+            return asset('storage/' . $this->webp_image);
+        }
+        return null;
+    }
+
 
     /**
      * Relasi ke tabel magang
@@ -72,8 +121,8 @@ class Logbook extends Model
             return $query->whereHas('magang.siswa', function ($q) use ($search) {
                 $q->where('nama', 'ILIKE', "%{$search}%");
             })
-            ->orWhere('kegiatan', 'ILIKE', "%{$search}%")
-            ->orWhere('kendala', 'ILIKE', "%{$search}%");
+                ->orWhere('kegiatan', 'ILIKE', "%{$search}%")
+                ->orWhere('kendala', 'ILIKE', "%{$search}%");
         }
         return $query;
     }

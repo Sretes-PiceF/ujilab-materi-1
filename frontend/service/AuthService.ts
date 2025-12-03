@@ -3,11 +3,11 @@ import axios from "axios";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export const authService = {
-    login: async (email: string, password: string) => {
+    login: async (email: string, password: string, recaptchaToken: string) => {
         try {
             const response = await axios.post(
                 `${API_URL}/login`,
-                { email, password },
+                { email, password, recaptcha_token: recaptchaToken },
                 {
                     headers: {
                         "Content-Type": "application/json",

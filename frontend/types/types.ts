@@ -7,4 +7,5 @@ export interface NavigationItem {
     badge?: string | null;
     description?: string;
     isSection?: boolean; // Tambahkan untuk section header
+    isLogout?: boolean;
 }

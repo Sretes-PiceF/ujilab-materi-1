@@ -7,8 +7,10 @@ use App\Models\Magang;
 use App\Models\Siswa;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class LogbookSiswaController extends Controller
 {
@@ -183,18 +185,7 @@ class LogbookSiswaController extends Controller
                 'tanggal' => 'required|date|before_or_equal:today',
                 'kegiatan' => 'required|string|min:10',
                 'kendala' => 'required|string|min:5',
-                'file' => 'nullable|image|mimes:jpeg,jpg,png|max:2048', // Max 2MB
-            ], [
-                'tanggal.required' => 'Tanggal harus diisi',
-                'tanggal.date' => 'Format tanggal tidak valid',
-                'tanggal.before_or_equal' => 'Tanggal tidak boleh melebihi hari ini',
-                'kegiatan.required' => 'Kegiatan harus diisi',
-                'kegiatan.min' => 'Kegiatan minimal 10 karakter',
-                'kendala.required' => 'Kendala harus diisi',
-                'kendala.min' => 'Kendala minimal 5 karakter',
-                'file.image' => 'File harus berupa gambar',
-                'file.mimes' => 'File harus berformat jpeg, jpg, atau png',
-                'file.max' => 'Ukuran file maksimal 2MB',
+                'file' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:2048', // Max 2MB (sudah dikompres di frontend)
             ]);
 
             if ($validator->fails()) {
@@ -217,23 +208,45 @@ class LogbookSiswaController extends Controller
                 ], 422);
             }
 
-            // Handle upload file jika ada
-            $filePath = null;
-            if ($request->hasFile('file')) {
-                $file = $request->file('file');
-                $fileName = 'logbook_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $filePath = $file->storeAs('logbook', $fileName, 'public');
-            }
-
-            // Simpan logbook
-            $logbook = Logbook::create([
+            // Data logbook dasar
+            $logbookData = [
                 'magang_id' => $magang->id,
                 'tanggal' => $request->tanggal,
                 'kegiatan' => $request->kegiatan,
                 'kendala' => $request->kendala,
-                'file' => $filePath,
                 'status_verifikasi' => 'pending',
-            ]);
+            ];
+
+            // Handle upload file jika ada (sudah dikompres di frontend)
+            if ($request->hasFile('file') && $request->file('file')->isValid()) {
+                $file = $request->file('file');
+                $fileSize = $file->getSize();
+                $fileExtension = $file->getClientOriginalExtension();
+
+                // Generate unique filename
+                $timestamp = time();
+                $randomString = Str::random(10);
+
+                // Simpan file utama (yang sudah dikompres di frontend)
+                $mainFileName = 'logbook_' . $timestamp . '_' . $randomString . '.' . $fileExtension;
+                $mainFilePath = $file->storeAs('logbooks', $mainFileName, 'public');
+
+                // Untuk sederhana, kita anggap file yang diupload adalah versi yang sudah optimal
+                // Jadi kita simpan di beberapa kolom dengan path yang sama
+                $logbookData = array_merge($logbookData, [
+                    'file' => $mainFilePath, // Backward compatibility
+                    'original_image' => $mainFilePath, // Sama dengan file utama
+                    'thumbnail' => $mainFilePath, // Untuk sekarang sama dulu
+                    'webp_image' => null, // Frontend bisa upload langsung webp
+                    'webp_thumbnail' => null,
+                    'original_size' => $fileSize,
+                    'optimized_size' => $fileSize, // Karena sudah dikompres di frontend
+                    'image_format' => $fileExtension,
+                ]);
+            }
+
+            // Simpan logbook
+            $logbook = Logbook::create($logbookData);
 
             return response()->json([
                 'success' => true,
@@ -249,10 +262,11 @@ class LogbookSiswaController extends Controller
                 ]
             ], 201);
         } catch (\Exception $e) {
+            Log::error('Logbook store error: ' . $e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menambahkan logbook',
-                'error' => $e->getMessage()
+                'message' => 'Gagal menambahkan logbook: ' . $e->getMessage()
             ], 500);
         }
     }
