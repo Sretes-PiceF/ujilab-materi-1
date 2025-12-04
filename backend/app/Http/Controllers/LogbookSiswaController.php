@@ -169,6 +169,8 @@ class LogbookSiswaController extends Controller
 
     public function store(Request $request)
     {
+        Log::info('=== LOGBOOK STORE START ===');
+
         try {
             // Cek apakah siswa memiliki magang aktif
             $magang = $this->getActiveMagang();
@@ -176,16 +178,22 @@ class LogbookSiswaController extends Controller
             if (!$magang) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Anda tidak memiliki magang aktif. Hanya siswa dengan status magang "berlangsung" yang dapat membuat logbook.'
+                    'message' => 'Anda tidak memiliki magang aktif.'
                 ], 403);
             }
 
-            // Validasi input
+            // Validasi input DENGAN 3 FILE
             $validator = Validator::make($request->all(), [
                 'tanggal' => 'required|date|before_or_equal:today',
                 'kegiatan' => 'required|string|min:10',
                 'kendala' => 'required|string|min:5',
-                'file' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:2048', // Max 2MB (sudah dikompres di frontend)
+                'file' => 'nullable|image|mimes:jpeg,jpg,png|max:5120', // JPG dari frontend
+                'webp_image' => 'nullable|mimes:webp|max:5120',        // WebP dari frontend
+                'webp_thumbnail' => 'nullable|mimes:webp|max:2048',    // Thumbnail WebP
+                'original_size' => 'nullable|integer',                  // Metadata
+                'compressed_size' => 'nullable|integer',                // Metadata
+                'webp_size' => 'nullable|integer',                      // Metadata
+                'thumbnail_size' => 'nullable|integer',                 // Metadata
             ]);
 
             if ($validator->fails()) {
@@ -196,7 +204,7 @@ class LogbookSiswaController extends Controller
                 ], 422);
             }
 
-            // Cek apakah sudah ada logbook untuk tanggal yang sama
+            // Cek duplikat tanggal
             $existingLogbook = Logbook::where('magang_id', $magang->id)
                 ->whereDate('tanggal', $request->tanggal)
                 ->first();
@@ -215,39 +223,99 @@ class LogbookSiswaController extends Controller
                 'kegiatan' => $request->kegiatan,
                 'kendala' => $request->kendala,
                 'status_verifikasi' => 'pending',
+                'original_size' => $request->original_size ?? 0,
+                'optimized_size' => $request->compressed_size ?? 0,
             ];
 
-            // Handle upload file jika ada (sudah dikompres di frontend)
-            if ($request->hasFile('file') && $request->file('file')->isValid()) {
-                $file = $request->file('file');
-                $fileSize = $file->getSize();
-                $fileExtension = $file->getClientOriginalExtension();
+            // Generate unique base filename
+            $timestamp = time();
+            $randomString = Str::random(10);
+            $baseFilename = 'logbook_' . $timestamp . '_' . $randomString;
 
-                // Generate unique filename
-                $timestamp = time();
-                $randomString = Str::random(10);
+            $directory = 'logbook';
 
-                // Simpan file utama (yang sudah dikompres di frontend)
-                $mainFileName = 'logbook_' . $timestamp . '_' . $randomString . '.' . $fileExtension;
-                $mainFilePath = $file->storeAs('logbooks', $mainFileName, 'public');
+            Log::info('Base filename: ' . $baseFilename);
 
-                // Untuk sederhana, kita anggap file yang diupload adalah versi yang sudah optimal
-                // Jadi kita simpan di beberapa kolom dengan path yang sama
-                $logbookData = array_merge($logbookData, [
-                    'file' => $mainFilePath, // Backward compatibility
-                    'original_image' => $mainFilePath, // Sama dengan file utama
-                    'thumbnail' => $mainFilePath, // Untuk sekarang sama dulu
-                    'webp_image' => null, // Frontend bisa upload langsung webp
-                    'webp_thumbnail' => null,
-                    'original_size' => $fileSize,
-                    'optimized_size' => $fileSize, // Karena sudah dikompres di frontend
-                    'image_format' => $fileExtension,
+            // Handle upload MULTIPLE FILES
+            $hasAnyFile = $request->hasFile('file') ||
+                $request->hasFile('webp_image') ||
+                $request->hasFile('webp_thumbnail');
+
+            if ($hasAnyFile) {
+                Log::info('Processing image uploads (multi-format)');
+
+                // 1. Simpan file JPG (dari field 'file' - untuk kompatibilitas)
+                if ($request->hasFile('file')) {
+                    $file = $request->file('file');
+                    $fileExtension = strtolower($file->getClientOriginalExtension());
+
+                    // Jika JPG/PNG dari frontend
+                    if (in_array($fileExtension, ['jpg', 'jpeg', 'png'])) {
+                        $mainFileName = $baseFilename . '.jpg';
+                        $mainFilePath = $file->storeAs($directory, $mainFileName, 'public');
+
+                        $logbookData['file'] = $mainFilePath; // Legacy: 'file' column
+                        $logbookData['original_image'] = $mainFilePath; // 'original_image' column
+
+                        Log::info('JPG/PNG saved as: ' . $mainFilePath);
+                    }
+                }
+
+                // 2. Simpan WebP image (utama)
+                if ($request->hasFile('webp_image')) {
+                    $webpFile = $request->file('webp_image');
+                    $webpFilename = $baseFilename . '.webp';
+                    $webpPath = $webpFile->storeAs($directory, $webpFilename, 'public');
+                    $logbookData['webp_image'] = $webpPath;
+
+                    Log::info('WebP image saved: ' . $webpPath);
+
+                    // Jika belum ada JPG, gunakan WebP sebagai fallback
+                    if (!isset($logbookData['file'])) {
+                        $logbookData['file'] = $webpPath;
+                        $logbookData['original_image'] = $webpPath;
+                    }
+                }
+
+                // 3. Simpan WebP thumbnail
+                if ($request->hasFile('webp_thumbnail')) {
+                    $thumbnailFile = $request->file('webp_thumbnail');
+                    $thumbnailFilename = $baseFilename . '_thumbnail.webp';
+                    $thumbnailPath = $thumbnailFile->storeAs($directory, $thumbnailFilename, 'public');
+                    $logbookData['webp_thumbnail'] = $thumbnailPath; // 'webp_thumbnail' column
+
+                    Log::info('WebP thumbnail saved: ' . $thumbnailPath);
+                }
+                // Jika tidak ada thumbnail khusus, buat dari webp_image
+                elseif (isset($logbookData['webp_image'])) {
+                    // Simpan path yang sama untuk thumbnail (tidak ideal tapi kompatibel)
+                    $logbookData['webp_thumbnail'] = $logbookData['webp_image'];
+                }
+
+                // Verifikasi file tersimpan
+                $filesToCheck = array_filter([
+                    $logbookData['file'] ?? null,
+                    $logbookData['webp_image'] ?? null,
                 ]);
+
+                foreach ($filesToCheck as $filePath) {
+                    if ($filePath && !Storage::disk('public')->exists($filePath)) {
+                        Log::error('File not found: ' . $filePath);
+                        throw new \Exception('File tidak tersimpan dengan benar: ' . $filePath);
+                    }
+                }
+
+                Log::info('Image processing completed');
+            } else {
+                Log::info('No images uploaded');
             }
 
-            // Simpan logbook
+            // Simpan logbook ke database
+            Log::info('Saving logbook to database');
             $logbook = Logbook::create($logbookData);
+            Log::info('Logbook saved with ID: ' . $logbook->id);
 
+            // Return response dengan SEMUA data
             return response()->json([
                 'success' => true,
                 'message' => 'Logbook berhasil ditambahkan',
@@ -257,12 +325,29 @@ class LogbookSiswaController extends Controller
                     'tanggal' => $logbook->tanggal->format('Y-m-d'),
                     'kegiatan' => $logbook->kegiatan,
                     'kendala' => $logbook->kendala,
-                    'file' => $logbook->file ? url('storage/' . $logbook->file) : null,
                     'status_verifikasi' => $logbook->status_verifikasi,
+
+                    // File paths
+                    'file' => $logbook->file,
+                    'original_image' => $logbook->original_image,
+                    'webp_image' => $logbook->webp_image,
+                    'webp_thumbnail' => $logbook->webp_thumbnail,
+
+                    // URLs
+                    'file_url' => $logbook->file ? url('storage/' . $logbook->file) : null,
+                    'original_image_url' => $logbook->original_image ? url('storage/' . $logbook->original_image) : null,
+                    'webp_image_url' => $logbook->webp_image ? url('storage/' . $logbook->webp_image) : null,
+                    'thumbnail_url' => $logbook->thumbnail ? url('storage/' . $logbook->thumbnail) : null,
+                    'webp_thumbnail_url' => $logbook->webp_thumbnail ? url('storage/' . $logbook->webp_thumbnail) : null,
+
+                    // Metadata
+                    'original_size' => $logbook->original_size,
+                    'optimized_size' => $logbook->optimized_size,
                 ]
             ], 201);
         } catch (\Exception $e) {
             Log::error('Logbook store error: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
 
             return response()->json([
                 'success' => false,
