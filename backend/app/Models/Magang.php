@@ -18,7 +18,8 @@ class Magang extends Model
         'status',
         'nilai_akhir',
         'tanggal_mulai',
-        'tanggal_selesai'
+        'tanggal_selesai',
+        'verification_token',
     ];
 
     // ENUM values dari database
@@ -61,5 +62,4 @@ class Magang extends Model
     {
         return $this->hasMany(Logbook::class);
     }
-    
 }

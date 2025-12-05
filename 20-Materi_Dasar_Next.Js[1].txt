@@ -136,7 +136,7 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Fallback untuk browser lama
 
 =======================================================
-	Ini untuk Logbook{OTW UDAH 40%}
+			Selesai
 =======================================================
 
 
@@ -191,6 +191,10 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Menambahkan marker
 * Menampilkan posisi user (GPS)
 
+==============================================
+		OTW
+==============================================
+
 ---
 
 ## **16. Realtime Database (Supabase Realtime)**
@@ -198,6 +202,10 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Konsep realtime
 * Listen event insert/update/delete
 * Contoh live status / komentar
+
+============================================
+		Selesai
+============================================
 
 
 ---
@@ -231,6 +239,10 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Text search (nama, ID, kategori)
 * Filter kategori, tanggal, status
 * Debounce input agar tidak berat
+
+=========================================
+	Ada beberapa yang belu
+=========================================
 
 ---
 
