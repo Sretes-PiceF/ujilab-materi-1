@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class MagangGuruController extends Controller
 {
@@ -239,6 +240,8 @@ class MagangGuruController extends Controller
                 'catatan.max' => 'Catatan maksimal 500 karakter',
             ]);
 
+
+
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
@@ -269,8 +272,14 @@ class MagangGuruController extends Controller
             // Validasi: Jika status diubah ke selesai, pastikan tanggal selesai sudah lewat
             if ($request->status === 'selesai' && $magang->status !== 'selesai') {
                 $tanggalSelesai = \Carbon\Carbon::parse($request->tanggal_selesai);
-                if ($tanggalSelesai->isFuture()) {
+                $hariIni = \Carbon\Carbon::now()->startOfDay();
+
+                if ($tanggalSelesai->gt($hariIni)) {
                     $errors['status'] = 'Tidak dapat mengubah status ke selesai sebelum tanggal selesai';
+                } else {
+                    if (is_null($magang->verification_token)) {
+                        $magang->verification_token = Str::uuid()->toString();
+                    }
                 }
             }
 
@@ -297,6 +306,7 @@ class MagangGuruController extends Controller
                 'tanggal_selesai' => $request->tanggal_selesai,
                 'status' => $request->status,
                 'nilai_akhir' => $request->nilai_akhir,
+                'verification_token' => $request->verification ?? null,
             ];
 
             // Hanya update siswa_id jika diperbolehkan
@@ -308,6 +318,11 @@ class MagangGuruController extends Controller
             if ($request->has('catatan')) {
                 // Jika ada field catatan di model, uncomment line berikut:
                 // $updateData['catatan'] = $request->catatan;
+            }
+
+            // Jika token sudah ter-generate (atau sudah ada), pastikan ia dimasukkan ke $updateData
+            if (!is_null($magang->verification_token)) {
+                $updateData['verification_token'] = $magang->verification_token;
             }
 
             // Update data

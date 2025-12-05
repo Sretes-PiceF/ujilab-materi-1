@@ -415,10 +415,10 @@ export function MagangTable() {
                       <Calendar className="h-4 w-4 text-gray-400" />
                       <div>
                         <p className="text-xs font-medium text-gray-800">
-                          {formatDate(magang.tanggal_mulai)}
+                          {formatDate(magang.tanggal_mulai || "Menunggu")}
                         </p>
                         <p className="text-xs text-gray-500">
-                          s.d {formatDate(magang.tanggal_selesai)}
+                          s.d {formatDate(magang.tanggal_selesai || "Menunggu")}
                         </p>
                       </div>
                     </div>

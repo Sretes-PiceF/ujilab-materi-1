@@ -13,12 +13,10 @@ return new class extends Migration
     {
         Schema::table('logbook', function (Blueprint $table) {
             $table->string('original_image')->nullable()->after('file');
-            $table->string('thumbnail')->nullable()->after('original_image');
             $table->string('webp_image')->nullable()->after('thumbnail');
             $table->string('webp_thumbnail')->nullable()->after('webp_image');
             $table->integer('original_size')->nullable()->after('webp_thumbnail');
             $table->integer('optimized_size')->nullable()->after('original_size');
-            $table->string('image_format')->default('jpg')->after('optimized_size');
         });
     }
 

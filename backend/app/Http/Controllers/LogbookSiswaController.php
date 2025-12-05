@@ -169,106 +169,123 @@ class LogbookSiswaController extends Controller
 
     public function store(Request $request)
     {
-        try {
-            // Cek apakah siswa memiliki magang aktif
-            $magang = $this->getActiveMagang();
+        // Cek apakah siswa memiliki magang aktif
+        $magang = $this->getActiveMagang();
 
-            if (!$magang) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Anda tidak memiliki magang aktif. Hanya siswa dengan status magang "berlangsung" yang dapat membuat logbook.'
-                ], 403);
-            }
-
-            // Validasi input
-            $validator = Validator::make($request->all(), [
-                'tanggal' => 'required|date|before_or_equal:today',
-                'kegiatan' => 'required|string|min:10',
-                'kendala' => 'required|string|min:5',
-                'file' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:2048', // Max 2MB (sudah dikompres di frontend)
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            // Cek apakah sudah ada logbook untuk tanggal yang sama
-            $existingLogbook = Logbook::where('magang_id', $magang->id)
-                ->whereDate('tanggal', $request->tanggal)
-                ->first();
-
-            if ($existingLogbook) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Anda sudah membuat logbook untuk tanggal ini'
-                ], 422);
-            }
-
-            // Data logbook dasar
-            $logbookData = [
-                'magang_id' => $magang->id,
-                'tanggal' => $request->tanggal,
-                'kegiatan' => $request->kegiatan,
-                'kendala' => $request->kendala,
-                'status_verifikasi' => 'pending',
-            ];
-
-            // Handle upload file jika ada (sudah dikompres di frontend)
-            if ($request->hasFile('file') && $request->file('file')->isValid()) {
-                $file = $request->file('file');
-                $fileSize = $file->getSize();
-                $fileExtension = $file->getClientOriginalExtension();
-
-                // Generate unique filename
-                $timestamp = time();
-                $randomString = Str::random(10);
-
-                // Simpan file utama (yang sudah dikompres di frontend)
-                $mainFileName = 'logbook_' . $timestamp . '_' . $randomString . '.' . $fileExtension;
-                $mainFilePath = $file->storeAs('logbooks', $mainFileName, 'public');
-
-                // Untuk sederhana, kita anggap file yang diupload adalah versi yang sudah optimal
-                // Jadi kita simpan di beberapa kolom dengan path yang sama
-                $logbookData = array_merge($logbookData, [
-                    'file' => $mainFilePath, // Backward compatibility
-                    'original_image' => $mainFilePath, // Sama dengan file utama
-                    'thumbnail' => $mainFilePath, // Untuk sekarang sama dulu
-                    'webp_image' => null, // Frontend bisa upload langsung webp
-                    'webp_thumbnail' => null,
-                    'original_size' => $fileSize,
-                    'optimized_size' => $fileSize, // Karena sudah dikompres di frontend
-                    'image_format' => $fileExtension,
-                ]);
-            }
-
-            // Simpan logbook
-            $logbook = Logbook::create($logbookData);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Logbook berhasil ditambahkan',
-                'data' => [
-                    'id' => $logbook->id,
-                    'magang_id' => $logbook->magang_id,
-                    'tanggal' => $logbook->tanggal->format('Y-m-d'),
-                    'kegiatan' => $logbook->kegiatan,
-                    'kendala' => $logbook->kendala,
-                    'file' => $logbook->file ? url('storage/' . $logbook->file) : null,
-                    'status_verifikasi' => $logbook->status_verifikasi,
-                ]
-            ], 201);
-        } catch (\Exception $e) {
-            Log::error('Logbook store error: ' . $e->getMessage());
-
+        if (!$magang) {
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menambahkan logbook: ' . $e->getMessage()
-            ], 500);
+                'message' => 'Anda tidak memiliki magang aktif.'
+            ], 403);
         }
+
+        // Validasi input dengan 3 file
+        $validator = Validator::make($request->all(), [
+            'tanggal' => 'required|date|before_or_equal:today',
+            'kegiatan' => 'required|string|min:10',
+            'kendala' => 'required|string|min:5',
+            'file' => 'nullable|image|mimes:jpeg,jpg,png|max:5120',      // JPG terkompresi dari frontend
+            'webp_image' => 'nullable|mimes:webp|max:5120',             // WebP utama dari frontend
+            'webp_thumbnail' => 'nullable|mimes:webp|max:2048',         // Thumbnail WebP dari frontend
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Cek duplikat tanggal
+        $existingLogbook = Logbook::where('magang_id', $magang->id)
+            ->whereDate('tanggal', $request->tanggal)
+            ->first();
+
+        if ($existingLogbook) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda sudah membuat logbook untuk tanggal ini'
+            ], 422);
+        }
+
+        // Data logbook dasar
+        $logbookData = [
+            'magang_id' => $magang->id,
+            'tanggal' => $request->tanggal,
+            'kegiatan' => $request->kegiatan,
+            'kendala' => $request->kendala,
+            'status_verifikasi' => 'pending',
+            'original_size' => $request->original_size ?? 0,
+            'optimized_size' => $request->compressed_size ?? 0,
+        ];
+
+        // Generate unique base filename untuk semua file
+        $timestamp = time();
+        $randomString = Str::random(10);
+        $baseFilename = 'logbook_' . $timestamp . '_' . $randomString;
+        $directory = 'logbook';
+
+        // Handle upload MULTIPLE FILES dari frontend
+        $hasAnyFile = $request->hasFile('file') ||
+            $request->hasFile('webp_image') ||
+            $request->hasFile('webp_thumbnail');
+
+        if ($hasAnyFile) {
+            // 1. Simpan file JPG (dari field 'file' - untuk kompatibilitas)
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+                $jpgFilename = $baseFilename . '.jpg';
+                $jpgPath = $file->storeAs($directory, $jpgFilename, 'public');
+
+                $logbookData['file'] = $jpgPath;           // Legacy column
+                $logbookData['original_image'] = $jpgPath; // Original column
+            }
+
+            // 2. Simpan WebP image (utama)
+            if ($request->hasFile('webp_image')) {
+                $webpFile = $request->file('webp_image');
+                $webpFilename = $baseFilename . '.webp';
+                $webpPath = $webpFile->storeAs($directory, $webpFilename, 'public');
+                $logbookData['webp_image'] = $webpPath;
+
+                // Jika tidak ada JPG, gunakan WebP sebagai fallback
+                if (!isset($logbookData['file'])) {
+                    $logbookData['file'] = $webpPath;
+                    $logbookData['original_image'] = $webpPath;
+                }
+            }
+
+            // 3. Simpan WebP thumbnail
+            if ($request->hasFile('webp_thumbnail')) {
+                $thumbnailFile = $request->file('webp_thumbnail');
+                $thumbnailFilename = $baseFilename . '_thumbnail.webp';
+                $thumbnailPath = $thumbnailFile->storeAs($directory, $thumbnailFilename, 'public');
+                $logbookData['webp_thumbnail'] = $thumbnailPath;
+            }
+            // Jika tidak ada thumbnail, jangan buat dari webp_image
+            // Biarkan NULL saja, jangan duplicate
+        }
+
+        // Simpan logbook ke database
+        $logbook = Logbook::create($logbookData);
+
+        // Return response
+        return response()->json([
+            'success' => true,
+            'message' => 'Logbook berhasil ditambahkan',
+            'data' => [
+                'id' => $logbook->id,
+                'magang_id' => $logbook->magang_id,
+                'tanggal' => $logbook->tanggal->format('Y-m-d'),
+                'kegiatan' => $logbook->kegiatan,
+                'kendala' => $logbook->kendala,
+                'status_verifikasi' => $logbook->status_verifikasi,
+                'file_url' => $logbook->file ? url('storage/' . $logbook->file) : null,
+                'webp_image_url' => $logbook->webp_image ? url('storage/' . $logbook->webp_image) : null,
+                'thumbnail_url' => $logbook->webp_thumbnail ? url('storage/' . $logbook->webp_thumbnail) : null,
+            ]
+        ], 201);
     }
 
     /**

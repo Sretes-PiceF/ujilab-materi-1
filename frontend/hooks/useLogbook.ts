@@ -11,6 +11,11 @@ export interface LogbookEntry {
     kendala: string;
     file: string | null;
     status_verifikasi: 'pending' | 'disetujui' | 'ditolak';
+    original_image?: string;
+    webp_image?: string;
+    webp_thumbnail?: string;
+  original_size?: number;      // Tambahkan ini
+  optimized_size?: number;     // Tambahkan in
     catatan_guru: string | null;
     catatan_dudi: string | null;
     siswa: {
@@ -68,6 +73,7 @@ export function useLogbook() {
         per_page?: number;
         search?: string;
         status?: string;
+        silent?: boolean;
     }) => {
         try {
             setLoading(true);
