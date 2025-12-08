@@ -1,5 +1,5 @@
 // components/layout/guru/MagangTable.tsx
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   User,
   Building2,
@@ -14,7 +14,10 @@ import { useMagang } from "@/hooks/useMagang";
 import { Magang } from "@/types/magang";
 import { MagangModal } from "./update/MagangModal";
 
-const getStatusClasses = (status: Magang["status"]) => {
+// Extend tipe status untuk include "terdaftar" (virtual status)
+type ExtendedStatus = Magang["status"] | "terdaftar";
+
+const getStatusClasses = (status: ExtendedStatus) => {
   switch (status) {
     case "berlangsung":
       return "bg-green-100 text-green-700 border-green-200";
@@ -28,12 +31,14 @@ const getStatusClasses = (status: Magang["status"]) => {
       return "bg-red-100 text-red-700 border-red-200";
     case "dibatalkan":
       return "bg-gray-100 text-gray-700 border-gray-200";
+    case "terdaftar":
+      return "bg-cyan-100 text-cyan-700 border-cyan-200";
     default:
       return "bg-gray-100 text-gray-700 border-gray-200";
   }
 };
 
-const getStatusLabel = (status: Magang["status"]) => {
+const getStatusLabel = (status: ExtendedStatus) => {
   switch (status) {
     case "berlangsung":
       return "Berlangsung";
@@ -47,6 +52,8 @@ const getStatusLabel = (status: Magang["status"]) => {
       return "Ditolak";
     case "dibatalkan":
       return "Dibatalkan";
+    case "terdaftar":
+      return "Terdaftar";
     default:
       return status;
   }
@@ -70,6 +77,12 @@ interface MagangForModal {
   catatan?: string;
   siswa?: any;
   dudi?: any;
+}
+
+// Interface untuk extended magang (dengan status yang bisa berubah)
+interface ExtendedMagang extends Omit<Magang, "status"> {
+  status: ExtendedStatus;
+  originalStatus: Magang["status"]; // Simpan status asli dari DB
 }
 
 export function MagangTable() {
@@ -97,8 +110,56 @@ export function MagangTable() {
   );
   const [modalTitle, setModalTitle] = useState("");
 
+  // LOGIKA STATUS TERDAFTAR: Process magang list dengan logika status "Terdaftar"
+  const processedMagangList = useMemo(() => {
+    // Group magang berdasarkan siswa_id
+    const magangBySiswa = new Map<number, Magang[]>();
+    magangList.forEach((magang) => {
+      if (!magangBySiswa.has(magang.siswa_id)) {
+        magangBySiswa.set(magang.siswa_id, []);
+      }
+      magangBySiswa.get(magang.siswa_id)!.push(magang);
+    });
+
+    // Process setiap magang
+    const result: ExtendedMagang[] = magangList.map((magang) => {
+      const siswaId = magang.siswa_id;
+      const siswaMagangList = magangBySiswa.get(siswaId) || [];
+
+      // Cek apakah siswa ini punya magang dengan status 'diterima' atau 'berlangsung'
+      const hasActiveOrAccepted = siswaMagangList.some(
+        (m) =>
+          m.id !== magang.id &&
+          (m.status === "diterima" || m.status === "berlangsung")
+      );
+
+      // Jika siswa punya magang aktif/diterima di DUDI lain,
+      // dan magang ini bukan yang aktif/diterima, ubah statusnya jadi "terdaftar"
+      let displayStatus: ExtendedStatus = magang.status;
+
+      if (hasActiveOrAccepted) {
+        // Jika magang ini bukan yang diterima/berlangsung/selesai, tampilkan sebagai "terdaftar"
+        if (
+          magang.status !== "diterima" &&
+          magang.status !== "berlangsung" &&
+          magang.status !== "selesai"
+        ) {
+          displayStatus = "terdaftar";
+        }
+      }
+
+      return {
+        ...magang,
+        status: displayStatus,
+        originalStatus: magang.status, // Simpan status asli
+      };
+    });
+
+    return result;
+  }, [magangList]);
+
   // Filter data
-  const filteredData = magangList.filter((magang) => {
+  const filteredData = processedMagangList.filter((magang) => {
     const matchesSearch =
       magang.siswa?.nama?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       magang.siswa?.nis?.toString().includes(searchTerm) ||
@@ -124,6 +185,7 @@ export function MagangTable() {
 
   // Format tanggal
   const formatDate = (dateString: string) => {
+    if (!dateString) return "-";
     return new Date(dateString).toLocaleDateString("id-ID", {
       day: "numeric",
       month: "short",
@@ -132,14 +194,14 @@ export function MagangTable() {
   };
 
   // Konversi Magang ke MagangForModal
-  const convertToModalFormat = (magang: Magang): MagangForModal => {
+  const convertToModalFormat = (magang: ExtendedMagang): MagangForModal => {
     return {
       id: magang.id.toString(),
       siswa_id: magang.siswa_id.toString(),
       dudi_id: magang.dudi_id.toString(),
       tanggal_mulai: magang.tanggal_mulai,
       tanggal_selesai: magang.tanggal_selesai,
-      status: magang.status,
+      status: magang.originalStatus, // Gunakan status asli untuk edit
       nilai_akhir: magang.nilai_akhir ?? null,
       siswa: magang.siswa,
       dudi: magang.dudi,
@@ -154,7 +216,7 @@ export function MagangTable() {
   };
 
   // Handle buka modal untuk edit
-  const handleEditMagang = (magang: Magang) => {
+  const handleEditMagang = (magang: ExtendedMagang) => {
     const modalMagang = convertToModalFormat(magang);
     setSelectedMagang(modalMagang);
     setModalTitle("Edit Data Magang");
@@ -196,7 +258,7 @@ export function MagangTable() {
   };
 
   // Handle delete magang
-  const handleDelete = async (magang: Magang) => {
+  const handleDelete = async (magang: ExtendedMagang) => {
     if (
       confirm(
         `Apakah Anda yakin ingin menghapus magang untuk siswa ${magang.siswa?.nama}?`
@@ -264,6 +326,7 @@ export function MagangTable() {
                 <option value="berlangsung">Berlangsung</option>
                 <option value="selesai">Selesai</option>
                 <option value="dibatalkan">Dibatalkan</option>
+                <option value="terdaftar">Terdaftar</option>
               </select>
             </div>
 
@@ -415,10 +478,10 @@ export function MagangTable() {
                       <Calendar className="h-4 w-4 text-gray-400" />
                       <div>
                         <p className="text-xs font-medium text-gray-800">
-                          {formatDate(magang.tanggal_mulai || "Menunggu")}
+                          {formatDate(magang.tanggal_mulai)}
                         </p>
                         <p className="text-xs text-gray-500">
-                          s.d {formatDate(magang.tanggal_selesai || "Menunggu")}
+                          s.d {formatDate(magang.tanggal_selesai)}
                         </p>
                       </div>
                     </div>

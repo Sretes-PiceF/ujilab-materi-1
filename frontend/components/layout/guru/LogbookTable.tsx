@@ -173,12 +173,16 @@ export function LogbookTable() {
     try {
       const token = localStorage.getItem("access_token");
       const response = await fetch(
-        `http://localhost:8000/api/logbook/delete/${entry.id}`,
+        `${
+          process.env.NEXT_PUBLIC_API_URL ||
+          `http://localhost:8000/api/logbook/delete/${entry.id}`
+        }/logbook/delete/${entry.id}`,
         {
           method: "DELETE",
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
         }
       );
@@ -239,12 +243,16 @@ export function LogbookTable() {
       }
 
       const response = await fetch(
-        `http://localhost:8000/api/logbook/update/${selectedUpdateLogbook.id}`,
+        `${
+          process.env.NEXT_PUBLIC_API_URL ||
+          `http://localhost:8000/api/logbook/update/${selectedUpdateLogbook.id}`
+        }/logbook/update/${selectedUpdateLogbook.id}`,
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
           body: formDataToSend,
         }
@@ -280,20 +288,21 @@ export function LogbookTable() {
 
   // Handler untuk view detail
   const handleViewDetail = (entry: LogbookEntry) => {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_LARAVEL_BASE_URL || "http://localhost:8000";
+
     const formattedEntry = {
       ...entry,
       optimized_size: entry.optimized_size || 0,
       original_size: entry.original_size || 0,
       webp_image_url: entry.webp_image
-        ? `http://localhost:8000/storage/${entry.webp_image}`
+        ? `${baseUrl}/storage/${entry.webp_image}`
         : entry.file
-        ? `http://localhost:8000/storage/${entry.file}`
+        ? `${baseUrl}/storage/${entry.file}`
         : undefined,
-      file_url: entry.file
-        ? `http://localhost:8000/storage/${entry.file}`
-        : undefined,
+      file_url: entry.file ? `${baseUrl}/storage/${entry.file}` : undefined,
       webp_thumbnail_url: entry.webp_thumbnail
-        ? `http://localhost:8000/storage/${entry.webp_thumbnail}`
+        ? `${baseUrl}/storage/${entry.webp_thumbnail}`
         : undefined,
     };
 

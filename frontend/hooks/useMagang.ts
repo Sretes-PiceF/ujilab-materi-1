@@ -86,6 +86,7 @@ export const useMagang = () => {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
+      "ngrok-skip-browser-warning": "true",
     };
   };
 
@@ -251,6 +252,7 @@ export const useMagang = () => {
       const response = await fetch(`${API_URL}/guru/siswa/list`, {
         method: 'GET',
         headers: getAuthHeaders(),
+        
       });
 
       if (!response.ok) {

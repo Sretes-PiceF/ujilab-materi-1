@@ -41,9 +41,9 @@ interface CreateLogbookData {
     kendala: string;
     file?: File;
 }
-
+ 
 // Base URL untuk API Laravel
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Helper function untuk mendapatkan token dari cookies
 const getAuthToken = (): string | null => {
@@ -63,6 +63,7 @@ const getHeaders = (contentType: string = 'application/json'): HeadersInit => {
     const token = getAuthToken();
     const headers: HeadersInit = {
         'Accept': 'application/json',
+        "ngrok-skip-browser-warning": "true",
     };
 
     // Only add Content-Type if it's not FormData
@@ -164,12 +165,13 @@ export const useLogbook = () => {
                 ...(status !== 'all' && { status })
             });
 
-            const apiUrl = `${API_BASE_URL}/api/siswa/logbook?${params}`;
+            const apiUrl = `${API_BASE_URL}/siswa/logbook?${params}`;
             console.log('API URL:', apiUrl);
 
             const response = await fetch(apiUrl, {
                 headers: getHeaders(),
                 credentials: 'include' // Important for cookies
+                
             });
 
             // Debug the response

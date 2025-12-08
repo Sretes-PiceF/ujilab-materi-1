@@ -1,6 +1,6 @@
 // components/layout/siswa/LogbookTable.tsx
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Calendar,
   Camera,
@@ -11,8 +11,9 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useLogbook, LogbookData } from "@/hooks/siswa/useLogbook";
-import { TambahLogbookModal } from "./create/LogbookModal"; // Import modal
+import { TambahLogbookModal } from "./create/LogbookModal";
 import { LogbookUpdateModal } from "./update/LogbookUpdate";
+import { supabase } from "@/lib/supabaseClient";
 
 // Props untuk komponen
 interface LogbookTableProps {
@@ -22,7 +23,7 @@ interface LogbookTableProps {
   onDelete?: (logbook: LogbookData) => void;
   statusMagang?: string;
   showAddButton?: boolean;
-  refreshTrigger?: number; // Untuk refresh data setelah tambah logbook
+  refreshTrigger?: number;
 }
 
 // Map status dari backend ke frontend
@@ -30,9 +31,9 @@ const mapStatus = (status: string): string => {
   switch (status) {
     case "pending":
       return "Belum Diverifikasi";
-    case "approved":
+    case "disetujui":
       return "Disetujui";
-    case "rejected":
+    case "ditolak":
       return "Ditolak";
     default:
       return status;
@@ -45,9 +46,9 @@ const mapStatusToBackend = (status: string): string => {
     case "Belum Diverifikasi":
       return "pending";
     case "Disetujui":
-      return "approved";
+      return "disetujui";
     case "Ditolak":
-      return "rejected";
+      return "ditolak";
     default:
       return "all";
   }
@@ -76,22 +77,105 @@ export function LogbookTable({
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // Cek apakah siswa bisa menambah logbook (magang sedang berlangsung)
-  const canAddLogbook = statusMagang === "berlangsung";
+  const canAddLogbook =
+    statusMagang === "berlangsung" || statusMagang === "diterima";
 
-  // Refresh data ketika refreshTrigger berubah atau modal tambah ditutup
+  // Auto refresh ketika refreshTrigger berubah atau modal ditutup
   useEffect(() => {
+    refreshData();
+  }, [refreshTrigger]);
+
+  // Real-time subscription untuk logbook siswa
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("logbook-siswa-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "logbook",
+        },
+        async (payload) => {
+          // Hanya refresh jika logbook milik siswa yang login
+          console.log("New logbook inserted:", payload.new);
+          await handleAutoRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "logbook",
+        },
+        async (payload) => {
+          // Refresh jika ada perubahan status verifikasi
+          if (
+            payload.new.status_verifikasi !== payload.old?.status_verifikasi
+          ) {
+            console.log("Logbook status updated:", payload.new);
+            await handleAutoRefresh();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "logbook",
+        },
+        async () => {
+          console.log("Logbook deleted");
+          await handleAutoRefresh();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, []);
+
+  // Fungsi refresh data
+  const refreshData = () => {
     const backendStatus =
       statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
     fetchLogbooks(currentPage, entriesPerPage, searchTerm, backendStatus);
-  }, [refreshTrigger]);
-
-  // Handler untuk search dan filter
-  const handleSearch = () => {
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(1, entriesPerPage, searchTerm, backendStatus);
-    setCurrentPage(1);
   };
+
+  // Auto-refresh function untuk real-time
+  const handleAutoRefresh = useCallback(async () => {
+    try {
+      const backendStatus =
+        statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
+      await fetchLogbooks(
+        currentPage,
+        entriesPerPage,
+        searchTerm,
+        backendStatus
+      );
+    } catch (error) {
+      console.error("Error auto-refreshing:", error);
+    }
+  }, [currentPage, entriesPerPage, searchTerm, statusFilter, fetchLogbooks]);
+
+  // Handler untuk search dan filter dengan debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const backendStatus =
+        statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
+      fetchLogbooks(1, entriesPerPage, searchTerm, backendStatus);
+      setCurrentPage(1);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm, statusFilter, entriesPerPage]);
 
   // Handler untuk perubahan halaman
   const handlePageChange = (page: number) => {
@@ -109,17 +193,6 @@ export function LogbookTable({
     fetchLogbooks(1, value, searchTerm, backendStatus);
     setCurrentPage(1);
   };
-
-  // Auto search ketika search term berubah (dengan debounce)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchTerm !== "" || statusFilter !== "Semua") {
-        handleSearch();
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter]);
 
   // Fungsi untuk menentukan apakah aksi (edit/hapus) harus ditampilkan
   const shouldShowActions = (logbook: LogbookData): boolean => {
@@ -186,15 +259,7 @@ export function LogbookTable({
         const result = await deleteLogbook(logbook.id);
         if (result.success) {
           alert("Logbook berhasil dihapus");
-          // Refresh data
-          const backendStatus =
-            statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-          fetchLogbooks(currentPage, entriesPerPage, searchTerm, backendStatus);
-
-          // Call parent callback jika ada
-          if (onDelete) {
-            onDelete(logbook);
-          }
+          // Refresh data via real-time akan otomatis terpanggil
         } else {
           alert("Gagal menghapus logbook: " + result.message);
         }
@@ -224,23 +289,26 @@ export function LogbookTable({
 
   const handleSuccessTambahLogbook = () => {
     console.log("Logbook berhasil ditambahkan");
-    // Refresh data
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(currentPage, entriesPerPage, searchTerm, backendStatus);
-
-    // Tutup modal
+    // Real-time subscription akan otomatis refresh data
     setShowTambahModal(false);
+  };
+
+  // Handler setelah update berhasil
+  const handleSuccessUpdate = () => {
+    console.log("Logbook berhasil diupdate");
+    // Real-time subscription akan otomatis refresh data
+    setShowUpdateModal(false);
+    setSelectedLogbook(null);
   };
 
   // Format status class
   const getStatusClass = (status: string) => {
     switch (status) {
-      case "approved":
+      case "disetujui":
         return "bg-green-100 text-green-700 border border-green-200";
       case "pending":
         return "bg-yellow-100 text-yellow-700 border border-yellow-200";
-      case "rejected":
+      case "ditolak":
         return "bg-red-100 text-red-700 border border-red-200";
       default:
         return "bg-gray-100 text-gray-700 border border-gray-200";
@@ -285,22 +353,9 @@ export function LogbookTable({
     );
   }
 
-  // Handler setelah update berhasil
-  const handleSuccessUpdate = () => {
-    console.log("Logbook berhasil diupdate");
-    // Refresh data
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(currentPage, entriesPerPage, searchTerm, backendStatus);
-
-    // Tutup modal
-    setShowUpdateModal(false);
-    setSelectedLogbook(null);
-  };
-
   return (
     <div className="space-y-4">
-      {/* Info Status Magang - Hanya muncul jika magang belum mulai atau sudah selesai */}
+      {/* Info Status Magang */}
       {statusMessage && (
         <div
           className={`rounded-xl p-4 flex items-start gap-3 ${
@@ -325,7 +380,7 @@ export function LogbookTable({
       )}
 
       <div className="bg-white shadow-sm rounded-xl border border-gray-100 overflow-hidden">
-        {/* Header Card dengan Daftar Logbook Harian dan Tombol */}
+        {/* Header Card */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-[#4FC3F7]" />
@@ -334,7 +389,7 @@ export function LogbookTable({
             </h2>
           </div>
 
-          {/* Tombol Tambah Logbook - Hanya muncul jika magang berlangsung */}
+          {/* Tombol Tambah Logbook */}
           {showAddButton && (
             <button
               onClick={handleAddLogbook}
@@ -519,7 +574,7 @@ export function LogbookTable({
 
                   {/* Aksi */}
                   <div className="col-span-1 flex items-center justify-center gap-1">
-                    {/* Tombol Lihat Detail - SELALU muncul untuk semua status */}
+                    {/* Tombol Lihat Detail */}
                     <button
                       onClick={() => handleViewDetail(log)}
                       className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -528,7 +583,7 @@ export function LogbookTable({
                       <Eye className="h-4 w-4" />
                     </button>
 
-                    {/* Tombol Edit - Hanya muncul jika status pending DAN magang berlangsung */}
+                    {/* Tombol Edit */}
                     {shouldShowActions(log) && canAddLogbook && (
                       <button
                         onClick={() => handleEdit(log)}
@@ -539,7 +594,7 @@ export function LogbookTable({
                       </button>
                     )}
 
-                    {/* Tombol Hapus - Hanya muncul jika status pending DAN magang berlangsung */}
+                    {/* Tombol Hapus */}
                     {shouldShowActions(log) && canAddLogbook && (
                       <button
                         onClick={() => handleDelete(log)}
@@ -607,6 +662,8 @@ export function LogbookTable({
           </div>
         )}
       </div>
+
+      {/* Modal Update Logbook */}
       <LogbookUpdateModal
         isOpen={showUpdateModal}
         onClose={() => {
@@ -616,6 +673,7 @@ export function LogbookTable({
         onSuccess={handleSuccessUpdate}
         logbook={selectedLogbook}
       />
+
       {/* Modal Tambah Logbook */}
       <TambahLogbookModal
         open={showTambahModal}

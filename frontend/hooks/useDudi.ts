@@ -16,6 +16,7 @@ export const useDudi = () => {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
+            "ngrok-skip-browser-warning": "true",
         };
     };
 
