@@ -13,7 +13,7 @@ import {
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 
-// Interface untuk data magang - SESUAIKAN DENGAN RESPONSE BACKEND
+// Interface untuk data magang
 interface MagangData {
   name: string;
   nis: string;
@@ -24,7 +24,7 @@ interface MagangData {
   period: string;
   status: string;
   finalGrade: string | null;
-  verification_token: string | null; // ✅ PERBAIKAN: ubah dari 'verification' ke 'verification_token'
+  verification_token: string | null;
 }
 
 export default function MagangPage() {
@@ -34,15 +34,6 @@ export default function MagangPage() {
   const [error, setError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-
-  // Debugging useEffect
-  useEffect(() => {
-    console.log("Magang Data Updated:", magangData);
-    console.log("Status:", magangData?.status);
-    console.log("Verification Token:", magangData?.verification_token);
-    console.log("Can Show QR:", canShowQrButton);
-    console.log("QR Code URL:", qrCodeUrl);
-  }, [magangData]);
 
   // Dynamic import QR Code component
   const DynamicQrCodeComponent = dynamic(
@@ -68,23 +59,18 @@ export default function MagangPage() {
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
-            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
-          cache: "no-cache",
         }
       );
 
-      console.log("Response Status:", response.status);
-
       if (response.ok) {
         const result = await response.json();
-        console.log("API Response:", result);
 
         if (result.success && result.data) {
-          // ✅ PERBAIKAN: Mapping property verification_token
+          // Format data
           const formattedData = {
             ...result.data,
-            // Jika backend mengembalikan 'verification' tapi kita butuh 'verification_token'
             verification_token:
               result.data.verification_token ||
               result.data.verification ||
@@ -98,13 +84,11 @@ export default function MagangPage() {
           setError(result.message || "Data magang tidak ditemukan");
         }
       } else {
-        const errorText = await response.text();
-        console.error("API Error Response:", errorText);
-        throw new Error(`Gagal mengambil data magang: ${response.status}`);
+        throw new Error("Gagal mengambil data magang");
       }
     } catch (err: any) {
       console.error("Error fetching magang data:", err);
-      setError(err.message || "Gagal memuat data magang");
+      setError("Gagal memuat data magang");
     } finally {
       setLoading(false);
     }
@@ -114,60 +98,26 @@ export default function MagangPage() {
     fetchMagangData();
   }, []);
 
-  // ✅ Fungsi Download PDF yang benar
+  // ✅ Fungsi Download PDF
   const handleDownloadReport = async () => {
     if (!magangData?.verification_token) {
       alert("Token verifikasi tidak tersedia");
-      console.error("Verification token is missing:", magangData);
       return;
     }
 
     try {
       setIsDownloading(true);
-      const token = localStorage.getItem("access_token");
 
-      // ✅ Endpoint download PDF dari Laravel
+      // ✅ Gunakan route public dengan token
       const downloadUrl = `${
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
-      }/siswa/magang/download/${magangData.verification_token}`;
+        process.env.NEXT_PUBLIC_LARAVEL_BASE_URL || "http://localhost:8000"
+      }/verifikasi/pdf/${magangData.verification_token}`;
 
-      console.log("Download URL:", downloadUrl);
-
-      const response = await fetch(downloadUrl, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Download Error:", errorText);
-        throw new Error(`Gagal mengunduh laporan: ${response.status}`);
-      }
-
-      // Convert response to blob
-      const blob = await response.blob();
-
-      // Check if blob is valid
-      if (blob.size === 0) {
-        throw new Error("File PDF kosong atau tidak valid");
-      }
-
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Laporan_Magang_${magangData.nis}_${Date.now()}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-
-      // Cleanup
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      // Buka di tab baru
+      window.open(downloadUrl, "_blank");
     } catch (err: any) {
       console.error("Error downloading report:", err);
-      alert(`Gagal mengunduh laporan: ${err.message}`);
+      alert("Gagal mengunduh laporan");
     } finally {
       setIsDownloading(false);
     }
@@ -176,7 +126,6 @@ export default function MagangPage() {
   const hasMagang = magangData !== null;
 
   // ✅ Logika untuk menampilkan tombol QR & Download
-  // PERBAIKAN: Periksa status dengan case-insensitive
   const canShowQrButton =
     hasMagang &&
     magangData.status?.toLowerCase() === "selesai" &&

@@ -46,15 +46,20 @@ export function SidebarNavItem({ item, isActive }: SidebarNavItemProps) {
 
         if (token) {
           // Kirim request logout ke backend
-          await fetch("http://localhost:8000/api/logout", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: "application/json",
-              "Content-Type": "application/json",
-            },
-            credentials: "include",
-          });
+          await fetch(
+            `${
+              process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+            }/logout`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              credentials: "include",
+            }
+          );
         }
 
         // Hapus semua data autentikasi

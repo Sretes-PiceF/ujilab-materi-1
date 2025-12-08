@@ -20,5 +20,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::middleware(SiswaMiddleware::class)->group(function () {
         Route::get('pdf', [MagangSiswaController::class, 'generateLaporanMagangPdf']);
+        Route::get('/magang/download/{item}', [MagangSiswaController::class, 'generateLaporanMagangPdf'])->name('magang.download');
     });
 });

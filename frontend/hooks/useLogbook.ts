@@ -98,6 +98,7 @@ export function useLogbook() {
                         'Accept': 'application/json',
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`,
+                        "ngrok-skip-browser-warning": "true",
                     },
                 }
             );
@@ -137,6 +138,7 @@ export function useLogbook() {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
+                    "ngrok-skip-browser-warning": "true",
                 },
             });
 
@@ -177,6 +179,7 @@ export function useLogbook() {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
+                    "ngrok-skip-browser-warning": "true",
                 },
                 body: JSON.stringify(data),
             });

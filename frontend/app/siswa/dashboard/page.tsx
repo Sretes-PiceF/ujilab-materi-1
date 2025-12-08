@@ -32,12 +32,18 @@ export default function DashboardSiswa() {
         const token = localStorage.getItem("access_token");
 
         // Fetch data user
-        const userResponse = await fetch("http://localhost:8000/api/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-          },
-        });
+        const userResponse = await fetch(
+          `${
+            process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+          }/me`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "ngrok-skip-browser-warning": "true",
+            },
+          }
+        );
 
         if (userResponse.ok) {
           const result = await userResponse.json();
@@ -48,11 +54,14 @@ export default function DashboardSiswa() {
 
         // Fetch statistik status
         const statResponse = await fetch(
-          "http://localhost:8000/api/siswa/statistik",
+          `${
+            process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+          }/siswa/statistik`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
               Accept: "application/json",
+              "ngrok-skip-browser-warning": "true",
             },
           }
         );

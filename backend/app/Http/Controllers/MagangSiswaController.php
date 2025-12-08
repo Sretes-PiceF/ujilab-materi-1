@@ -69,61 +69,62 @@ class MagangSiswaController extends Controller
         }
     }
 
-    public function generateLaporanMagangPdf(Request $request)
+    public function generateLaporanMagangPdf($token)
     {
-        // 1. --- PENGAMBILAN DATA DINAMIS DARI DATABASE ---
+        try {
+            // 1. Dekripsi token untuk mendapatkan siswa_id
+            $siswaId = decrypt($token);
 
-        // Asumsi: Mendapatkan ID Siswa yang sedang login
-        // *Ganti ini sesuai dengan cara Anda mendapatkan ID Siswa yang valid (misalnya dari token API atau session)*
-        $siswaId = Auth::id(); // Contoh menggunakan Auth::id() jika ini endpoint web yang diotentikasi
+            // 2. Mencari data magang
+            $magang = Magang::where('siswa_id', $siswaId)
+                ->where('status', 'selesai')
+                ->with(['siswa', 'dudi'])
+                ->first();
 
-        // Mencari data magang yang dimiliki oleh siswa ini DAN berstatus 'selesai'
-        $magang = Magang::where('siswa_id', $siswaId)
-            ->where('status', 'selesai') // Filter utama: status harus 'selesai'
-            ->with(['siswa', 'dudi'])    // Memuat relasi Siswa dan Dudi
-            ->first();                   // Ambil data pertama
+            // 3. Validasi data magang
+            if (!$magang) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data magang dengan status selesai tidak ditemukan.'
+                ], 404);
+            }
 
-        // Validasi: Cek jika data magang tidak ditemukan
-        if (!$magang) {
-            // Anda bisa melempar error, atau mengarahkan kembali dengan pesan
-            abort(404, 'Data magang dengan status selesai tidak ditemukan.');
+            // 4. Format data
+            Carbon::setLocale('id');
+
+            $magangData = (object) [
+                'name' => $magang->siswa->nama,
+                'nis' => $magang->siswa->nis,
+                'class' => $magang->siswa->kelas,
+                'major' => $magang->siswa->jurusan,
+                'company' => $magang->dudi->nama_perusahaan,
+                'address' => $magang->dudi->alamat,
+                'tanggal_mulai' => $magang->tanggal_mulai,
+                'tanggal_selesai' => $magang->tanggal_selesai,
+                'status' => $this->getStatusDisplay($magang->status),
+                'finalGrade' => $magang->nilai_akhir
+            ];
+
+            // Format Periode Magang
+            $periode_mulai = Carbon::parse($magangData->tanggal_mulai)->translatedFormat('d F Y');
+            $periode_selesai = Carbon::parse($magangData->tanggal_selesai)->translatedFormat('d F Y');
+            $magangData->period = $periode_mulai . ' s.d ' . $periode_selesai;
+
+            // 5. Generate PDF
+            $data_for_view = [
+                'data_magang' => $magangData,
+            ];
+
+            $pdf = Pdf::loadView('pdf.laporan_magang', $data_for_view);
+            $filename = 'Laporan_Magang_' . $magangData->nis . '_' . time() . '.pdf';
+
+            return $pdf->download($filename);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
         }
-
-        // 2. --- FORMAT DATA ---
-
-        Carbon::setLocale('id');
-
-        // Mengambil dan memformat data sesuai dengan struktur yang dibutuhkan template:
-        $magangData = (object) [
-            'name' => $magang->siswa->nama,
-            'nis' => $magang->siswa->nis,
-            'class' => $magang->siswa->kelas,
-            'major' => $magang->siswa->jurusan,
-            'company' => $magang->dudi->nama_perusahaan,
-            'address' => $magang->dudi->alamat,
-            'tanggal_mulai' => $magang->tanggal_mulai,
-            'tanggal_selesai' => $magang->tanggal_selesai,
-            'status' => $this->getStatusDisplay($magang->status), // Gunakan helper yang sudah Anda miliki
-            'finalGrade' => $magang->nilai_akhir
-        ];
-
-        // Format Periode Magang ke Bahasa Indonesia
-        $periode_mulai = Carbon::parse($magangData->tanggal_mulai)->translatedFormat('d F Y');
-        $periode_selesai = Carbon::parse($magangData->tanggal_selesai)->translatedFormat('d F Y');
-        $magangData->period = $periode_mulai . ' s.d ' . $periode_selesai;
-
-
-        // 3. --- GENERASI PDF MENGGUNAKAN DOMPDF ---
-
-        $data_for_view = [
-            'data_magang' => $magangData,
-        ];
-
-        $pdf = Pdf::loadView('pdf.laporan_magang', $data_for_view);
-
-        $filename = 'Laporan_Magang_' . $magangData->nis . '_' . time() . '.pdf';
-
-        return $pdf->download($filename);
     }
 
     /**

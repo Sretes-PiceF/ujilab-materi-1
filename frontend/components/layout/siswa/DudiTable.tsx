@@ -71,6 +71,7 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
         }
       );
@@ -188,6 +189,7 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
             Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
           // Tidak perlu mengirim body karena backend hanya butuh dudi_id dari URL
         }
