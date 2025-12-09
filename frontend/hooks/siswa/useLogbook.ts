@@ -392,7 +392,7 @@ export const useLogbook = () => {
             const token = getAuthToken();
             console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
 
-            const response = await fetch(`${API_BASE_URL}/api/siswa/logbook/delete/${id}`, {
+            const response = await fetch(`${API_BASE_URL}/siswa/logbook/delete/${id}`, {
                 method: 'DELETE',
                 headers: getHeaders(),
                 credentials: 'include'

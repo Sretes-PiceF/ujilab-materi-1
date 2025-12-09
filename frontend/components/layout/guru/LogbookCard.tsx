@@ -1,9 +1,14 @@
 "use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BookOpen } from "lucide-react";
 import { LogbookItem } from "./LogbookItem";
-import { useEffect, useState } from "react";
 import PieChartCustom from "@/components/ui/charts/PieChartCustom";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabaseClient";
+
+/* ===================== TYPES ===================== */
 
 interface StatistikStatus {
   disetujui: number;
@@ -11,72 +16,108 @@ interface StatistikStatus {
   ditolak: number;
 }
 
+interface LogbookItemType {
+  id: number;
+  kegiatan: string;
+  kendaraan?: string;
+  status_verifikasi: "disetujui" | "pending" | "ditolak";
+  tanggal_formatted: string;
+  kendala?: string;
+}
+
+interface PieItem {
+  name: string;
+  value: number;
+  fill: string;
+}
+
+/* ===================== COMPONENT ===================== */
+
 export function LogbookCard() {
-  const [logbook, setLogbook] = useState<any[]>([]);
-  const [statusChart, setStatusChart] = useState<any[]>([]);
+  const [logbook, setLogbook] = useState<LogbookItemType[]>([]);
+  const [statusChart, setStatusChart] = useState<PieItem[]>([]);
   const [statistik, setStatistik] = useState<StatistikStatus>({
     disetujui: 0,
     pending: 0,
     ditolak: 0,
   });
 
-  useEffect(() => {
-    const fetchLogbook = async () => {
-      try {
-        // ✅ Perbaikan: Tambahkan parameter tanggal hari ini
-        const today = new Date().toISOString().split("T")[0]; // Format: YYYY-MM-DD
+  const [initialLoading, setInitialLoading] = useState(true);
+  const hasLoadedOnce = useRef(false);
 
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/dashboard/logbook?tanggal=${today}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-              "ngrok-skip-browser-warning": "true",
-            },
-          }
-        );
+  /* ===================== FETCH ===================== */
+  const fetchLogbook = useCallback(async () => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
 
-        const result = await res.json();
-        if (!result.success) return;
-
-        const statistikStatus: StatistikStatus = result.data.statistik_status;
-        const logbookTerbaru = result.data.logbook_terbaru;
-
-        // 🎯 Format Pie Chart dengan warna
-        const pieData = [
-          {
-            name: "Disetujui",
-            value: statistikStatus.disetujui,
-            fill: "#22c55e", // green-500
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/dashboard/logbook?tanggal=${today}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
           },
-          {
-            name: "Pending",
-            value: statistikStatus.pending,
-            fill: "#f59e0b", // amber-500
-          },
-          {
-            name: "Ditolak",
-            value: statistikStatus.ditolak,
-            fill: "#ef4444", // red-500
-          },
-        ];
+        }
+      );
 
-        const filteredPieData = pieData.filter((item) => item.value > 0);
+      if (!res.ok) return;
 
-        setStatusChart(filteredPieData);
-        setStatistik(statistikStatus);
-        setLogbook(logbookTerbaru);
-      } catch (error) {
-        console.error("Gagal memuat data logbook:", error);
+      const result = await res.json();
+      if (!result.success) return;
+
+      const statistikStatus: StatistikStatus = result.data.statistik_status;
+      const logbookTerbaru: LogbookItemType[] = result.data.logbook_terbaru;
+
+      const pieData: PieItem[] = [
+        {
+          name: "Disetujui",
+          value: statistikStatus.disetujui,
+          fill: "#22c55e",
+        },
+        { name: "Pending", value: statistikStatus.pending, fill: "#f59e0b" },
+        { name: "Ditolak", value: statistikStatus.ditolak, fill: "#ef4444" },
+      ].filter((item) => item.value > 0);
+
+      setStatistik(statistikStatus);
+      setStatusChart(pieData);
+      setLogbook(logbookTerbaru);
+    } catch {
+      // diam aja → UX > console noise
+    } finally {
+      if (!hasLoadedOnce.current) {
+        setInitialLoading(false);
+        hasLoadedOnce.current = true;
       }
-    };
-
-    fetchLogbook();
+    }
   }, []);
 
-  // Hitung total untuk persentase
+  /* ===================== FIRST LOAD ===================== */
+  useEffect(() => {
+    fetchLogbook();
+  }, [fetchLogbook]);
+
+  /* ===================== REALTIME ===================== */
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("logbook-card-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "logbook" },
+        fetchLogbook
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchLogbook]);
+
   const total = statistik.disetujui + statistik.pending + statistik.ditolak;
 
+  /* ===================== UI ===================== */
   return (
     <Card className="shadow-lg rounded-xl">
       <CardHeader className="py-4 px-6 border-b">
@@ -85,95 +126,18 @@ export function LogbookCard() {
           Statistik Logbook Hari Ini
         </CardTitle>
       </CardHeader>
+
       <CardContent className="p-4 space-y-6">
-        {/* ==========================📊 PIE CHART STATUS=========================== */}
+        {/* ================= PIE CHART ================= */}
         <div>
           <h2 className="text-sm font-medium mb-3 text-gray-700">
             Status Verifikasi
           </h2>
 
-          {/* Pie Chart */}
-          {total > 0 ? (
-            <>
-              <PieChartCustom data={statusChart} />
-
-              {/* Keterangan di bawah chart */}
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between p-2 bg-green-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                    <span className="text-sm font-medium text-gray-700">
-                      Disetujui
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-bold text-gray-900">
-                      {statistik.disetujui}
-                    </span>
-                    <span className="text-xs text-gray-500 ml-1">
-                      (
-                      {total > 0
-                        ? ((statistik.disetujui / total) * 100).toFixed(1)
-                        : 0}
-                      %)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-2 bg-amber-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                    <span className="text-sm font-medium text-gray-700">
-                      Pending
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-bold text-gray-900">
-                      {statistik.pending}
-                    </span>
-                    <span className="text-xs text-gray-500 ml-1">
-                      (
-                      {total > 0
-                        ? ((statistik.pending / total) * 100).toFixed(1)
-                        : 0}
-                      %)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-2 bg-red-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    <span className="text-sm font-medium text-gray-700">
-                      Ditolak
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-bold text-gray-900">
-                      {statistik.ditolak}
-                    </span>
-                    <span className="text-xs text-gray-500 ml-1">
-                      (
-                      {total > 0
-                        ? ((statistik.ditolak / total) * 100).toFixed(1)
-                        : 0}
-                      %)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-gray-700">
-                      Total
-                    </span>
-                    <span className="text-sm font-bold text-gray-900">
-                      {total}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </>
+          {initialLoading ? (
+            <Skeleton className="h-48 w-full rounded-lg" />
+          ) : total > 0 ? (
+            <PieChartCustom data={statusChart} />
           ) : (
             <p className="text-sm text-gray-500 text-center py-8">
               Belum ada data logbook hari ini.
@@ -181,12 +145,18 @@ export function LogbookCard() {
           )}
         </div>
 
-        {/* ==========================📝 LIST LOGBOOK TERBARU =========================== */}
-        <div className="space-y-2 pt-4 border-t border-gray-200">
+        {/* ================= LOGBOOK LIST ================= */}
+        <div className="pt-4 border-t border-gray-200 space-y-2">
           <h2 className="text-sm font-medium mb-3 text-gray-700">
             Logbook Terbaru
           </h2>
-          {logbook.length === 0 ? (
+
+          {initialLoading ? (
+            <>
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </>
+          ) : logbook.length === 0 ? (
             <p className="text-sm text-gray-500">Belum ada logbook hari ini.</p>
           ) : (
             logbook.map((item) => (

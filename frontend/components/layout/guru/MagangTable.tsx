@@ -102,12 +102,71 @@ const convertToExtendedMagang = (magang: MagangFromHook): ExtendedMagang => {
   };
 };
 
+// Komponen Loading Skeleton untuk Table
+const TableLoadingSkeleton = () => {
+  return (
+    <tbody className="bg-white divide-y divide-gray-100">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <tr key={i} className="animate-pulse">
+          {/* Kolom Siswa */}
+          <td className="px-3 py-4">
+            <div className="flex items-start space-x-3">
+              <div className="h-9 w-9 bg-gray-200 rounded-full shrink-0"></div>
+              <div className="space-y-2 flex-1">
+                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+              </div>
+            </div>
+          </td>
+          {/* Kolom Kelas & Jurusan */}
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-20"></div>
+              <div className="h-3 bg-gray-200 rounded w-24"></div>
+              <div className="h-3 bg-gray-200 rounded w-28"></div>
+            </div>
+          </td>
+          {/* Kolom DUDI */}
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-32"></div>
+              <div className="h-3 bg-gray-200 rounded w-40"></div>
+            </div>
+          </td>
+          {/* Kolom Periode */}
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-24"></div>
+              <div className="h-3 bg-gray-200 rounded w-24"></div>
+            </div>
+          </td>
+          {/* Kolom Status */}
+          <td className="px-3 py-4">
+            <div className="h-6 bg-gray-200 rounded-full w-20"></div>
+          </td>
+          {/* Kolom Nilai */}
+          <td className="px-3 py-4">
+            <div className="h-6 bg-gray-200 rounded-full w-12"></div>
+          </td>
+          {/* Kolom Aksi */}
+          <td className="px-3 py-4">
+            <div className="flex space-x-2">
+              <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
+              <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  );
+};
+
 export function MagangTable() {
   const {
     magangList,
     siswaList,
     dudiList,
-    loading,
     error,
     fetchMagang,
     deleteMagang,
@@ -119,6 +178,8 @@ export function MagangTable() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [entriesPerPage, setEntriesPerPage] = useState(5);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // State untuk modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -133,11 +194,20 @@ export function MagangTable() {
 
   // Load data awal hanya sekali
   useEffect(() => {
-    if (!hasInitialLoad.current) {
-      console.log("🔄 Loading data magang pertama kali...");
-      fetchMagang();
-      hasInitialLoad.current = true;
-    }
+    const loadInitialData = async () => {
+      if (!hasInitialLoad.current) {
+        console.log("🔄 Loading data magang pertama kali...");
+        setIsInitialLoading(true);
+        try {
+          await fetchMagang();
+        } finally {
+          setIsInitialLoading(false);
+          hasInitialLoad.current = true;
+        }
+      }
+    };
+
+    loadInitialData();
   }, [fetchMagang]);
 
   // Setup realtime subscription
@@ -377,10 +447,15 @@ export function MagangTable() {
     }
   };
 
-  // Handle manual refresh (hanya jika benar-benar diperlukan)
-  const handleManualRefresh = () => {
+  // Handle manual refresh
+  const handleManualRefresh = async () => {
     console.log("🔄 Manual refresh triggered");
-    fetchMagang();
+    setIsRefreshing(true);
+    try {
+      await fetchMagang();
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   if (error) {
@@ -400,7 +475,7 @@ export function MagangTable() {
   return (
     <>
       <div className="overflow-x-auto">
-        {/* HEADER DENGAN TOMBOL TAMBAH */}
+        {/* HEADER DENGAN TOMBOL TAMBAH & REFRESH */}
         <div className="flex justify-between items-center mb-3">
           <h1 className="text-2xl font-bold text-gray-800">Data Magang</h1>
           <div className="flex items-center gap-2"></div>
@@ -414,7 +489,8 @@ export function MagangTable() {
             placeholder="Cari siswa, NIS, kelas, jurusan, DUDI..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full max-w-lg px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#0097BB] focus:border-transparent transition-colors shadow-sm"
+            disabled={isInitialLoading}
+            className="w-full max-w-lg px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#0097BB] focus:border-transparent transition-colors shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
 
           {/* Filter Status */}
@@ -428,7 +504,8 @@ export function MagangTable() {
                 id="filter-status"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm"
+                disabled={isInitialLoading}
+                className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
                 <option value="all">Semua</option>
                 <option value="pending">Pending</option>
@@ -453,7 +530,8 @@ export function MagangTable() {
                   setEntriesPerPage(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm"
+                disabled={isInitialLoading}
+                className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
                 <option value={5}>5</option>
                 <option value={10}>10</option>
@@ -493,19 +571,12 @@ export function MagangTable() {
           </thead>
 
           {/* BODY TABLE */}
-          <tbody className="bg-white divide-y divide-gray-100">
-            {loading && !hasInitialLoad.current ? (
-              // Loading State hanya saat awal
-              <tr>
-                <td colSpan={7} className="px-3 py-8 text-center">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0097BB]"></div>
-                  </div>
-                  <p className="text-gray-500 mt-2">Memuat data magang...</p>
-                </td>
-              </tr>
-            ) : magangList.length === 0 ? (
-              // Empty State
+          {isInitialLoading ? (
+            // Loading Skeleton saat initial load
+            <TableLoadingSkeleton />
+          ) : magangList.length === 0 ? (
+            // Empty State - Tidak ada data sama sekali
+            <tbody className="bg-white">
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center">
                   <User className="h-12 w-12 text-gray-300 mx-auto mb-2" />
@@ -518,8 +589,10 @@ export function MagangTable() {
                   </button>
                 </td>
               </tr>
-            ) : paginatedData.length === 0 ? (
-              // No results from search/filter
+            </tbody>
+          ) : paginatedData.length === 0 ? (
+            // No results from search/filter
+            <tbody className="bg-white">
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center">
                   <p className="text-gray-500">
@@ -527,9 +600,11 @@ export function MagangTable() {
                   </p>
                 </td>
               </tr>
-            ) : (
-              // Data Rows - loading akan otomatis update via realtime tanpa loading UI
-              paginatedData.map((magang) => (
+            </tbody>
+          ) : (
+            // Data Rows
+            <tbody className="bg-white divide-y divide-gray-100">
+              {paginatedData.map((magang) => (
                 <tr
                   key={magang.id}
                   className="hover:bg-gray-50 transition-colors"
@@ -640,13 +715,13 @@ export function MagangTable() {
                     </button>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
+              ))}
+            </tbody>
+          )}
         </table>
 
         {/* Pagination */}
-        {!loading && filteredData.length > 0 && (
+        {!isInitialLoading && filteredData.length > 0 && (
           <div className="flex justify-between items-center pt-4 border-t mt-4 text-sm text-gray-600">
             <span>
               Menampilkan {startIndex + 1} sampai{" "}
@@ -656,7 +731,7 @@ export function MagangTable() {
             <div className="flex space-x-1">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
+                disabled={currentPage === 1 || isRefreshing}
                 className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 &lt;
@@ -666,7 +741,8 @@ export function MagangTable() {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`p-2 border rounded-lg transition-colors ${
+                    disabled={isRefreshing}
+                    className={`p-2 border rounded-lg transition-colors disabled:cursor-not-allowed ${
                       currentPage === page
                         ? "bg-[#0097BB] text-white"
                         : "hover:bg-gray-100"
@@ -680,7 +756,7 @@ export function MagangTable() {
                 onClick={() =>
                   setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                 }
-                disabled={currentPage === totalPages}
+                disabled={currentPage === totalPages || isRefreshing}
                 className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 &gt;
