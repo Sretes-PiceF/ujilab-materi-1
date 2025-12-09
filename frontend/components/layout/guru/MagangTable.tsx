@@ -1,5 +1,5 @@
 // components/layout/guru/MagangTable.tsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   User,
   Building2,
@@ -13,6 +13,9 @@ import {
 import { useMagang } from "@/hooks/useMagang";
 import { Magang } from "@/types/magang";
 import { MagangModal } from "./update/MagangModal";
+
+// Type dari useMagang hook (berdasarkan error, ini punya nilai_akhir: number | null | undefined)
+type MagangFromHook = ReturnType<typeof useMagang>["magangList"][0];
 
 // Extend tipe status untuk include "terdaftar" (virtual status)
 type ExtendedStatus = Magang["status"] | "terdaftar";
@@ -80,10 +83,24 @@ interface MagangForModal {
 }
 
 // Interface untuk extended magang (dengan status yang bisa berubah)
-interface ExtendedMagang extends Omit<Magang, "status"> {
+interface ExtendedMagang extends Omit<MagangFromHook, "status"> {
   status: ExtendedStatus;
   originalStatus: Magang["status"]; // Simpan status asli dari DB
 }
+
+// Fix: Function untuk mengonversi MagangFromHook ke ExtendedMagang
+const convertToExtendedMagang = (magang: MagangFromHook): ExtendedMagang => {
+  // Handle nilai_akhir yang mungkin undefined
+  const nilai_akhir =
+    magang.nilai_akhir !== undefined ? magang.nilai_akhir : null;
+
+  return {
+    ...magang,
+    nilai_akhir, // Konversi undefined ke null
+    status: magang.status, // Akan diubah nanti di processedMagangList
+    originalStatus: magang.status,
+  };
+};
 
 export function MagangTable() {
   const {
@@ -110,11 +127,97 @@ export function MagangTable() {
   );
   const [modalTitle, setModalTitle] = useState("");
 
+  // Flag untuk menandai apakah sudah load data awal
+  const hasInitialLoad = useRef(false);
+  const supabaseRef = useRef<any>(null);
+
+  // Load data awal hanya sekali
+  useEffect(() => {
+    if (!hasInitialLoad.current) {
+      console.log("🔄 Loading data magang pertama kali...");
+      fetchMagang();
+      hasInitialLoad.current = true;
+    }
+  }, [fetchMagang]);
+
+  // Setup realtime subscription
+  useEffect(() => {
+    const setupRealtime = async () => {
+      try {
+        // Import supabase secara dinamis
+        const { supabase } = await import("@/lib/supabaseClient");
+        supabaseRef.current = supabase;
+
+        if (supabase) {
+          console.log("🔗 Setting up Supabase realtime subscription...");
+
+          const channel = supabase
+            .channel("magang-realtime-updates")
+            .on(
+              "postgres_changes",
+              {
+                event: "INSERT",
+                schema: "public",
+                table: "magang",
+              },
+              () => {
+                console.log("📥 Realtime: INSERT detected, refreshing...");
+                fetchMagang();
+              }
+            )
+            .on(
+              "postgres_changes",
+              {
+                event: "UPDATE",
+                schema: "public",
+                table: "magang",
+              },
+              () => {
+                console.log("🔄 Realtime: UPDATE detected, refreshing...");
+                fetchMagang();
+              }
+            )
+            .on(
+              "postgres_changes",
+              {
+                event: "DELETE",
+                schema: "public",
+                table: "magang",
+              },
+              () => {
+                console.log("🗑️ Realtime: DELETE detected, refreshing...");
+                fetchMagang();
+              }
+            )
+            .subscribe((status) => {
+              console.log("📡 Supabase subscription status:", status);
+            });
+
+          return () => {
+            console.log("🧹 Cleaning up Supabase channel...");
+            supabase.removeChannel(channel);
+          };
+        }
+      } catch (error) {
+        console.warn("⚠️ Supabase realtime setup failed:", error);
+      }
+    };
+
+    setupRealtime();
+  }, [fetchMagang]);
+
   // LOGIKA STATUS TERDAFTAR: Process magang list dengan logika status "Terdaftar"
   const processedMagangList = useMemo(() => {
+    if (magangList.length === 0) return [];
+
+    // Konversi semua magang ke ExtendedMagang dulu
+    const extendedMagangList: ExtendedMagang[] = magangList.map(
+      convertToExtendedMagang
+    );
+
     // Group magang berdasarkan siswa_id
-    const magangBySiswa = new Map<number, Magang[]>();
-    magangList.forEach((magang) => {
+    const magangBySiswa = new Map<number, ExtendedMagang[]>();
+    extendedMagangList.forEach((magang) => {
       if (!magangBySiswa.has(magang.siswa_id)) {
         magangBySiswa.set(magang.siswa_id, []);
       }
@@ -122,7 +225,7 @@ export function MagangTable() {
     });
 
     // Process setiap magang
-    const result: ExtendedMagang[] = magangList.map((magang) => {
+    const result: ExtendedMagang[] = extendedMagangList.map((magang) => {
       const siswaId = magang.siswa_id;
       const siswaMagangList = magangBySiswa.get(siswaId) || [];
 
@@ -130,19 +233,20 @@ export function MagangTable() {
       const hasActiveOrAccepted = siswaMagangList.some(
         (m) =>
           m.id !== magang.id &&
-          (m.status === "diterima" || m.status === "berlangsung")
+          (m.originalStatus === "diterima" ||
+            m.originalStatus === "berlangsung")
       );
 
       // Jika siswa punya magang aktif/diterima di DUDI lain,
       // dan magang ini bukan yang aktif/diterima, ubah statusnya jadi "terdaftar"
-      let displayStatus: ExtendedStatus = magang.status;
+      let displayStatus: ExtendedStatus = magang.originalStatus;
 
       if (hasActiveOrAccepted) {
         // Jika magang ini bukan yang diterima/berlangsung/selesai, tampilkan sebagai "terdaftar"
         if (
-          magang.status !== "diterima" &&
-          magang.status !== "berlangsung" &&
-          magang.status !== "selesai"
+          magang.originalStatus !== "diterima" &&
+          magang.originalStatus !== "berlangsung" &&
+          magang.originalStatus !== "selesai"
         ) {
           displayStatus = "terdaftar";
         }
@@ -151,7 +255,6 @@ export function MagangTable() {
       return {
         ...magang,
         status: displayStatus,
-        originalStatus: magang.status, // Simpan status asli
       };
     });
 
@@ -193,7 +296,7 @@ export function MagangTable() {
     });
   };
 
-  // Konversi Magang ke MagangForModal
+  // Konversi ExtendedMagang ke MagangForModal
   const convertToModalFormat = (magang: ExtendedMagang): MagangForModal => {
     return {
       id: magang.id.toString(),
@@ -244,7 +347,7 @@ export function MagangTable() {
       }
 
       if (result.success) {
-        await fetchMagang(); // Refresh data
+        // Data akan otomatis di-refresh via realtime subscription
         return true;
       } else {
         alert("Gagal menyimpan data: " + result.message);
@@ -267,10 +370,17 @@ export function MagangTable() {
       const result = await deleteMagang(magang.id);
       if (result.success) {
         alert("Magang berhasil dihapus");
+        // Data akan otomatis di-refresh via realtime subscription
       } else {
         alert("Gagal menghapus magang: " + result.message);
       }
     }
+  };
+
+  // Handle manual refresh (hanya jika benar-benar diperlukan)
+  const handleManualRefresh = () => {
+    console.log("🔄 Manual refresh triggered");
+    fetchMagang();
   };
 
   if (error) {
@@ -278,7 +388,7 @@ export function MagangTable() {
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <p className="text-red-700">Error: {error}</p>
         <button
-          onClick={fetchMagang}
+          onClick={handleManualRefresh}
           className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
         >
           Coba Lagi
@@ -293,6 +403,7 @@ export function MagangTable() {
         {/* HEADER DENGAN TOMBOL TAMBAH */}
         <div className="flex justify-between items-center mb-3">
           <h1 className="text-2xl font-bold text-gray-800">Data Magang</h1>
+          <div className="flex items-center gap-2"></div>
         </div>
 
         {/* BARIS PENCARIAN & FILTER */}
@@ -383,8 +494,8 @@ export function MagangTable() {
 
           {/* BODY TABLE */}
           <tbody className="bg-white divide-y divide-gray-100">
-            {loading ? (
-              // Loading State
+            {loading && !hasInitialLoad.current ? (
+              // Loading State hanya saat awal
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center">
                   <div className="flex justify-center">
@@ -417,7 +528,7 @@ export function MagangTable() {
                 </td>
               </tr>
             ) : (
-              // Data Rows
+              // Data Rows - loading akan otomatis update via realtime tanpa loading UI
               paginatedData.map((magang) => (
                 <tr
                   key={magang.id}

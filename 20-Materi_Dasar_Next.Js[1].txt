@@ -162,7 +162,7 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * State management sederhana
 
 ===========================================================
-	Selesai Ini diterapkan di guru dan siswa
+	Selesai Tinggal Dudi Dan dashboard
 ===========================================================
 
 

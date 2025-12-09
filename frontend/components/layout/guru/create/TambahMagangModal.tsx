@@ -29,7 +29,13 @@ interface MagangFormData {
   dudi_id: string;
   tanggal_mulai: string;
   tanggal_selesai: string;
-  status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
+  status:
+    | "pending"
+    | "diterima"
+    | "ditolak"
+    | "berlangsung"
+    | "selesai"
+    | "dibatalkan";
   nilai_akhir: string;
 }
 
@@ -86,9 +92,10 @@ export function TambahMagangModal({
   // Filter siswa berdasarkan pencarian
   useEffect(() => {
     if (searchSiswa) {
-      const filtered = siswaList.filter(siswa =>
-        siswa.nama.toLowerCase().includes(searchSiswa.toLowerCase()) ||
-        siswa.nis.includes(searchSiswa)
+      const filtered = siswaList.filter(
+        (siswa) =>
+          siswa.nama.toLowerCase().includes(searchSiswa.toLowerCase()) ||
+          siswa.nis.includes(searchSiswa)
       );
       setFilteredSiswa(filtered);
     } else {
@@ -99,14 +106,16 @@ export function TambahMagangModal({
   const fetchSiswaList = async () => {
     try {
       const token = localStorage.getItem("access_token");
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
+      const API_URL =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
       const response = await fetch(`${API_URL}/guru/siswa/list`, {
         method: "GET",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
       });
 
@@ -121,21 +130,23 @@ export function TambahMagangModal({
         window.location.href = "/";
       }
     } catch (err) {
-      console.error('Error fetching siswa:', err);
+      console.error("Error fetching siswa:", err);
     }
   };
 
   const fetchDudiAktif = async () => {
     try {
       const token = localStorage.getItem("access_token");
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
+      const API_URL =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
       const response = await fetch(`${API_URL}/guru/dudi/list`, {
         method: "GET",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
       });
 
@@ -146,7 +157,7 @@ export function TambahMagangModal({
         }
       }
     } catch (err) {
-      console.error('Error fetching DUDI:', err);
+      console.error("Error fetching DUDI:", err);
     }
   };
 
@@ -167,25 +178,25 @@ export function TambahMagangModal({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    
+    setFormData((prev) => ({ ...prev, [name]: value }));
+
     if (fieldErrors[name]) {
-      setFieldErrors(prev => ({ ...prev, [name]: '' }));
+      setFieldErrors((prev) => ({ ...prev, [name]: "" }));
     }
     if (error) setError(null);
   };
 
   const handleSelectChange = (name: string, value: string) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
-    
+    setFormData((prev) => ({ ...prev, [name]: value }));
+
     // Jika memilih siswa, simpan data siswa yang dipilih
-    if (name === 'siswa_id') {
-      const siswa = siswaList.find(s => s.id.toString() === value);
+    if (name === "siswa_id") {
+      const siswa = siswaList.find((s) => s.id.toString() === value);
       setSelectedSiswa(siswa || null);
     }
-    
+
     if (fieldErrors[name]) {
-      setFieldErrors(prev => ({ ...prev, [name]: '' }));
+      setFieldErrors((prev) => ({ ...prev, [name]: "" }));
     }
     if (error) setError(null);
   };
@@ -196,13 +207,20 @@ export function TambahMagangModal({
     setFieldErrors({});
 
     // Validasi
-    if (!formData.siswa_id || !formData.dudi_id || !formData.tanggal_mulai || !formData.tanggal_selesai) {
+    if (
+      !formData.siswa_id ||
+      !formData.dudi_id ||
+      !formData.tanggal_mulai ||
+      !formData.tanggal_selesai
+    ) {
       setError("Data siswa, DUDI, dan periode magang wajib diisi!");
       setLoading(false);
       return;
     }
 
-    if (new Date(formData.tanggal_selesai) <= new Date(formData.tanggal_mulai)) {
+    if (
+      new Date(formData.tanggal_selesai) <= new Date(formData.tanggal_mulai)
+    ) {
       setError("Tanggal selesai harus setelah tanggal mulai");
       setLoading(false);
       return;
@@ -210,18 +228,21 @@ export function TambahMagangModal({
 
     try {
       const token = localStorage.getItem("access_token");
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
+      const API_URL =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
       const requestData = {
         siswa_id: parseInt(formData.siswa_id),
         dudi_id: parseInt(formData.dudi_id),
         tanggal_mulai: formData.tanggal_mulai,
         tanggal_selesai: formData.tanggal_selesai,
         status: formData.status,
-        nilai_akhir: formData.nilai_akhir ? parseFloat(formData.nilai_akhir) : null,
+        nilai_akhir: formData.nilai_akhir
+          ? parseFloat(formData.nilai_akhir)
+          : null,
       };
 
-      console.log('Data yang dikirim:', requestData);
+      console.log("Data yang dikirim:", requestData);
 
       const response = await fetch(`${API_URL}/guru/magang/create`, {
         method: "POST",
@@ -229,12 +250,13 @@ export function TambahMagangModal({
           Accept: "application/json",
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify(requestData),
       });
 
       const result = await response.json();
-      console.log('API Response:', result);
+      console.log("API Response:", result);
 
       if (response.status === 401) {
         localStorage.removeItem("access_token");
@@ -245,7 +267,7 @@ export function TambahMagangModal({
       if (response.status === 422) {
         if (result.errors) {
           const errors: Record<string, string> = {};
-          Object.keys(result.errors).forEach(key => {
+          Object.keys(result.errors).forEach((key) => {
             errors[key] = result.errors[key][0];
           });
           setFieldErrors(errors);
@@ -255,7 +277,9 @@ export function TambahMagangModal({
       }
 
       if (!response.ok) {
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
+        throw new Error(
+          result.message || `HTTP error! status: ${response.status}`
+        );
       }
 
       if (result.success) {
@@ -266,7 +290,7 @@ export function TambahMagangModal({
         throw new Error(result.message || "Gagal menambahkan magang");
       }
     } catch (err) {
-      console.error('Error creating magang:', err);
+      console.error("Error creating magang:", err);
       setError(err instanceof Error ? err.message : "Terjadi kesalahan");
     } finally {
       setLoading(false);
@@ -300,7 +324,7 @@ export function TambahMagangModal({
             <h3 className="text-lg font-semibold text-gray-800 mb-4 pb-2 border-b">
               Pilih Siswa
             </h3>
-            
+
             {/* Search Siswa */}
             <div className="mb-4">
               <div className="relative">
@@ -316,7 +340,9 @@ export function TambahMagangModal({
 
             {/* Select Siswa */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Pilih Siswa *</label>
+              <label className="text-sm font-medium text-gray-700">
+                Pilih Siswa *
+              </label>
               <Select
                 value={formData.siswa_id}
                 onValueChange={(value) => handleSelectChange("siswa_id", value)}
@@ -349,16 +375,37 @@ export function TambahMagangModal({
             {/* Info Siswa Terpilih */}
             {selectedSiswa && (
               <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h4 className="font-semibold text-blue-800 mb-2">Data Siswa Terpilih:</h4>
+                <h4 className="font-semibold text-blue-800 mb-2">
+                  Data Siswa Terpilih:
+                </h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="font-medium">Nama:</span> {selectedSiswa.nama}</div>
-                  <div><span className="font-medium">NIS:</span> {selectedSiswa.nis}</div>
-                  <div><span className="font-medium">Kelas:</span> {selectedSiswa.kelas}</div>
-                  <div><span className="font-medium">Jurusan:</span> {selectedSiswa.jurusan}</div>
-                  <div><span className="font-medium">Telepon:</span> {selectedSiswa.telepon}</div>
-                  <div><span className="font-medium">Email:</span> {selectedSiswa.email}</div>
+                  <div>
+                    <span className="font-medium">Nama:</span>{" "}
+                    {selectedSiswa.nama}
+                  </div>
+                  <div>
+                    <span className="font-medium">NIS:</span>{" "}
+                    {selectedSiswa.nis}
+                  </div>
+                  <div>
+                    <span className="font-medium">Kelas:</span>{" "}
+                    {selectedSiswa.kelas}
+                  </div>
+                  <div>
+                    <span className="font-medium">Jurusan:</span>{" "}
+                    {selectedSiswa.jurusan}
+                  </div>
+                  <div>
+                    <span className="font-medium">Telepon:</span>{" "}
+                    {selectedSiswa.telepon}
+                  </div>
+                  <div>
+                    <span className="font-medium">Email:</span>{" "}
+                    {selectedSiswa.email}
+                  </div>
                   <div className="col-span-2">
-                    <span className="font-medium">Alamat:</span> {selectedSiswa.alamat}
+                    <span className="font-medium">Alamat:</span>{" "}
+                    {selectedSiswa.alamat}
                   </div>
                 </div>
               </div>
@@ -373,10 +420,14 @@ export function TambahMagangModal({
             <div className="grid grid-cols-2 gap-4">
               {/* Pilih DUDI */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Pilih DUDI *</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Pilih DUDI *
+                </label>
                 <Select
                   value={formData.dudi_id}
-                  onValueChange={(value) => handleSelectChange("dudi_id", value)}
+                  onValueChange={(value) =>
+                    handleSelectChange("dudi_id", value)
+                  }
                 >
                   <SelectTrigger className="w-full bg-white">
                     <SelectValue placeholder="Pilih DUDI..." />
@@ -403,10 +454,14 @@ export function TambahMagangModal({
 
               {/* Status */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Status Magang</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Status Magang
+                </label>
                 <Select
                   value={formData.status}
-                  onValueChange={(value: any) => handleSelectChange("status", value)}
+                  onValueChange={(value: any) =>
+                    handleSelectChange("status", value)
+                  }
                 >
                   <SelectTrigger className="w-full bg-white">
                     <SelectValue placeholder="Pilih status" />
@@ -427,7 +482,9 @@ export function TambahMagangModal({
 
               {/* Tanggal Mulai */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Tanggal Mulai *</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Tanggal Mulai *
+                </label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
@@ -439,13 +496,17 @@ export function TambahMagangModal({
                   />
                 </div>
                 {fieldErrors.tanggal_mulai && (
-                  <p className="text-red-500 text-xs">{fieldErrors.tanggal_mulai}</p>
+                  <p className="text-red-500 text-xs">
+                    {fieldErrors.tanggal_mulai}
+                  </p>
                 )}
               </div>
 
               {/* Tanggal Selesai */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Tanggal Selesai *</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Tanggal Selesai *
+                </label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
@@ -457,13 +518,17 @@ export function TambahMagangModal({
                   />
                 </div>
                 {fieldErrors.tanggal_selesai && (
-                  <p className="text-red-500 text-xs">{fieldErrors.tanggal_selesai}</p>
+                  <p className="text-red-500 text-xs">
+                    {fieldErrors.tanggal_selesai}
+                  </p>
                 )}
               </div>
 
               {/* Nilai Akhir */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Nilai Akhir</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Nilai Akhir
+                </label>
                 <Input
                   type="number"
                   name="nilai_akhir"
@@ -476,7 +541,9 @@ export function TambahMagangModal({
                   className="bg-white"
                 />
                 {fieldErrors.nilai_akhir && (
-                  <p className="text-red-500 text-xs">{fieldErrors.nilai_akhir}</p>
+                  <p className="text-red-500 text-xs">
+                    {fieldErrors.nilai_akhir}
+                  </p>
                 )}
               </div>
             </div>
