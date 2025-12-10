@@ -1,6 +1,6 @@
 // components/layout/siswa/LogbookTable.tsx
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar,
   Camera,
@@ -8,14 +8,13 @@ import {
   Pencil,
   Trash2,
   Plus,
-  AlertCircle,
+  BookOpen,
 } from "lucide-react";
 import { useLogbook, LogbookData } from "@/hooks/siswa/useLogbook";
 import { TambahLogbookModal } from "./create/LogbookModal";
 import { LogbookUpdateModal } from "./update/LogbookUpdate";
 import { supabase } from "@/lib/supabaseClient";
 
-// Props untuk komponen
 interface LogbookTableProps {
   onAddLogbook?: () => void;
   onViewDetail?: (logbook: LogbookData) => void;
@@ -26,7 +25,6 @@ interface LogbookTableProps {
   refreshTrigger?: number;
 }
 
-// Map status dari backend ke frontend
 const mapStatus = (status: string): string => {
   switch (status) {
     case "pending":
@@ -40,7 +38,6 @@ const mapStatus = (status: string): string => {
   }
 };
 
-// Map status untuk filter
 const mapStatusToBackend = (status: string): string => {
   switch (status) {
     case "Belum Diverifikasi":
@@ -54,12 +51,60 @@ const mapStatusToBackend = (status: string): string => {
   }
 };
 
+// Komponen Loading Skeleton yang disesuaikan
+const TableLoadingSkeleton = () => {
+  return (
+    <tbody className="bg-white divide-y divide-gray-100">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <tr key={i} className="animate-pulse">
+          <td className="px-3 py-4">
+            <div className="flex items-start space-x-3">
+              <div className="h-11 w-11 bg-gray-200 rounded-lg shrink-0"></div>
+              <div className="space-y-2 flex-1">
+                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+              </div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="h-3 bg-gray-200 rounded w-1/4"></div>
+                <div className="h-4 bg-gray-200 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 rounded w-5/6"></div>
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 bg-gray-200 rounded w-1/4"></div>
+                <div className="h-4 bg-gray-200 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 rounded w-4/5"></div>
+              </div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="h-6 bg-gray-200 rounded-lg w-24 mx-auto"></div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-full"></div>
+              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="flex items-center justify-center gap-1">
+              <div className="h-8 w-8 bg-gray-200 rounded-lg"></div>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  );
+};
+
 export function LogbookTable({
   showAddButton = false,
   onAddLogbook,
   onViewDetail,
   onEdit,
-  onDelete,
   statusMagang,
   refreshTrigger = 0,
 }: LogbookTableProps) {
@@ -76,131 +121,109 @@ export function LogbookTable({
   );
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
-  // Cek apakah siswa bisa menambah logbook (magang sedang berlangsung)
+  // ✅ Penanda loading hanya pertama kali
+  const isFirstLoad = useRef(true);
+
   const canAddLogbook =
     statusMagang === "berlangsung" || statusMagang === "diterima";
 
-  // Auto refresh ketika refreshTrigger berubah atau modal ditutup
-  useEffect(() => {
-    refreshData();
-  }, [refreshTrigger]);
+  // ✅ Fungsi refresh data dengan parameter yang jelas
+  const refreshData = useCallback(
+    async (page: number, perPage: number, search: string, status: string) => {
+      const backendStatus =
+        status === "Semua" ? "all" : mapStatusToBackend(status);
+      await fetchLogbooks(page, perPage, search, backendStatus);
+    },
+    [fetchLogbooks]
+  );
 
-  // Real-time subscription untuk logbook siswa
+  // ✅ INITIAL DATA FETCH - sekali saat mount
   useEffect(() => {
-    if (!supabase) return;
+    const initialFetch = async () => {
+      try {
+        await refreshData(1, 10, "", "Semua");
+      } finally {
+        isFirstLoad.current = false;
+      }
+    };
+
+    initialFetch();
+  }, [refreshData]);
+
+  // ✅ REFRESH TRIGGER dari parent
+  useEffect(() => {
+    if (!isFirstLoad.current && refreshTrigger > 0) {
+      refreshData(currentPage, entriesPerPage, searchTerm, statusFilter);
+    }
+  }, [
+    refreshTrigger,
+    currentPage,
+    entriesPerPage,
+    searchTerm,
+    statusFilter,
+    refreshData,
+  ]);
+
+  // ✅ REALTIME SUBSCRIPTION - refresh dengan state saat ini
+  useEffect(() => {
+    if (!supabase || isFirstLoad.current) return;
 
     const channel = supabase
       .channel("logbook-siswa-realtime")
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "logbook",
         },
         async (payload) => {
-          // Hanya refresh jika logbook milik siswa yang login
-          console.log("New logbook inserted:", payload.new);
-          await handleAutoRefresh();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "logbook",
-        },
-        async (payload) => {
-          // Refresh jika ada perubahan status verifikasi
-          if (
-            payload.new.status_verifikasi !== payload.old?.status_verifikasi
-          ) {
-            console.log("Logbook status updated:", payload.new);
-            await handleAutoRefresh();
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "logbook",
-        },
-        async () => {
-          console.log("Logbook deleted");
-          await handleAutoRefresh();
+          console.log("Logbook realtime event:", payload.eventType);
+          // ✅ Silent refresh dengan state pagination saat ini
+          await refreshData(
+            currentPage,
+            entriesPerPage,
+            searchTerm,
+            statusFilter
+          );
         }
       )
       .subscribe();
 
     return () => {
-      if (supabase) {
-        supabase.removeChannel(channel);
-      }
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [currentPage, entriesPerPage, searchTerm, statusFilter, refreshData]);
 
-  // Fungsi refresh data
-  const refreshData = () => {
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(currentPage, entriesPerPage, searchTerm, backendStatus);
-  };
-
-  // Auto-refresh function untuk real-time
-  const handleAutoRefresh = useCallback(async () => {
-    try {
-      const backendStatus =
-        statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-      await fetchLogbooks(
-        currentPage,
-        entriesPerPage,
-        searchTerm,
-        backendStatus
-      );
-    } catch (error) {
-      console.error("Error auto-refreshing:", error);
-    }
-  }, [currentPage, entriesPerPage, searchTerm, statusFilter, fetchLogbooks]);
-
-  // Handler untuk search dan filter dengan debounce
+  // ✅ SEARCH & FILTER dengan debounce (skip saat initial load)
   useEffect(() => {
+    if (isFirstLoad.current) return;
+
     const timer = setTimeout(() => {
-      const backendStatus =
-        statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-      fetchLogbooks(1, entriesPerPage, searchTerm, backendStatus);
+      refreshData(1, entriesPerPage, searchTerm, statusFilter);
       setCurrentPage(1);
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter, entriesPerPage]);
+  }, [searchTerm, statusFilter, entriesPerPage, refreshData]);
 
   // Handler untuk perubahan halaman
-  const handlePageChange = (page: number) => {
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(page, entriesPerPage, searchTerm, backendStatus);
+  const handlePageChange = async (page: number) => {
     setCurrentPage(page);
+    await refreshData(page, entriesPerPage, searchTerm, statusFilter);
   };
 
   // Handler untuk perubahan entries per page
-  const handleEntriesPerPageChange = (value: number) => {
+  const handleEntriesPerPageChange = async (value: number) => {
     setEntriesPerPage(value);
-    const backendStatus =
-      statusFilter === "Semua" ? "all" : mapStatusToBackend(statusFilter);
-    fetchLogbooks(1, value, searchTerm, backendStatus);
     setCurrentPage(1);
+    await refreshData(1, value, searchTerm, statusFilter);
   };
 
-  // Fungsi untuk menentukan apakah aksi (edit/hapus) harus ditampilkan
   const shouldShowActions = (logbook: LogbookData): boolean => {
-    // Hanya tampilkan aksi jika status belum diverifikasi (pending)
     return logbook.status_verifikasi === "pending";
   };
 
-  // Handler untuk tombol aksi
   const handleViewDetail = (logbook: LogbookData) => {
     if (onViewDetail) {
       onViewDetail(logbook);
@@ -209,9 +232,7 @@ export function LogbookTable({
     }
   };
 
-  // Handler untuk edit logbook
   const handleEdit = (logbook: LogbookData) => {
-    // Cek apakah magang masih berlangsung
     if (!canAddLogbook) {
       alert(
         "Anda tidak dapat mengedit logbook karena magang sudah selesai atau belum dimulai"
@@ -219,24 +240,20 @@ export function LogbookTable({
       return;
     }
 
-    // Cek apakah logbook masih bisa diedit (hanya yang pending)
     if (logbook.status_verifikasi !== "pending") {
       alert("Logbook yang sudah diverifikasi tidak dapat diedit");
       return;
     }
 
-    // Buka modal edit
     setSelectedLogbook(logbook);
     setShowUpdateModal(true);
 
-    // Call parent callback jika ada
     if (onEdit) {
       onEdit(logbook);
     }
   };
 
   const handleDelete = async (logbook: LogbookData) => {
-    // Cek apakah magang masih berlangsung
     if (!canAddLogbook) {
       alert(
         "Anda tidak dapat menghapus logbook karena magang sudah selesai atau belum dimulai"
@@ -244,7 +261,6 @@ export function LogbookTable({
       return;
     }
 
-    // Cek apakah logbook masih bisa dihapus (hanya yang pending)
     if (logbook.status_verifikasi !== "pending") {
       alert("Logbook yang sudah diverifikasi tidak dapat dihapus");
       return;
@@ -259,7 +275,6 @@ export function LogbookTable({
         const result = await deleteLogbook(logbook.id);
         if (result.success) {
           alert("Logbook berhasil dihapus");
-          // Refresh data via real-time akan otomatis terpanggil
         } else {
           alert("Gagal menghapus logbook: " + result.message);
         }
@@ -278,10 +293,8 @@ export function LogbookTable({
       return;
     }
 
-    // Buka modal tambah logbook
     setShowTambahModal(true);
 
-    // Call parent callback jika ada
     if (onAddLogbook) {
       onAddLogbook();
     }
@@ -289,19 +302,15 @@ export function LogbookTable({
 
   const handleSuccessTambahLogbook = () => {
     console.log("Logbook berhasil ditambahkan");
-    // Real-time subscription akan otomatis refresh data
     setShowTambahModal(false);
   };
 
-  // Handler setelah update berhasil
   const handleSuccessUpdate = () => {
     console.log("Logbook berhasil diupdate");
-    // Real-time subscription akan otomatis refresh data
     setShowUpdateModal(false);
     setSelectedLogbook(null);
   };
 
-  // Format status class
   const getStatusClass = (status: string) => {
     switch (status) {
       case "disetujui":
@@ -315,26 +324,53 @@ export function LogbookTable({
     }
   };
 
-  // Get status message untuk info box
   const getStatusMessage = () => {
-    if (statusMagang === "pending" || statusMagang === "diterima") {
-      return {
-        type: "info",
-        message:
-          "Magang Anda belum dimulai. Anda dapat menambah logbook setelah magang berlangsung.",
-      };
-    } else if (
-      statusMagang === "selesai" ||
-      statusMagang === "ditolak" ||
-      statusMagang === "dibatalkan"
-    ) {
-      return {
-        type: "warning",
-        message:
-          "Magang Anda sudah selesai/dibatalkan. Anda tidak dapat menambah atau mengedit logbook.",
-      };
+    switch (statusMagang) {
+      case "selesai":
+      case "berlangsung":
+        return {
+          message: "Magang Anda sedang / telah selesai.",
+          style: {
+            bg: "bg-green-50 border-green-200",
+            text: "text-green-800",
+            icon: "text-green-600",
+          },
+        };
+
+      case "ditolak":
+      case "dibatalkan":
+        return {
+          message:
+            "Magang Anda ditolak atau dibatalkan. Anda tidak dapat menambah atau mengedit logbook.",
+          style: {
+            bg: "bg-red-50 border-red-200",
+            text: "text-red-800",
+            icon: "text-red-600",
+          },
+        };
+
+      case "diterima":
+        return {
+          message:
+            "Magang Anda telah diterima. Silakan menunggu hingga magang berlangsung.",
+          style: {
+            bg: "bg-blue-100 border-blue-300",
+            text: "text-blue-900",
+            icon: "text-blue-700",
+          },
+        };
+
+      case "pending":
+      default:
+        return {
+          message: "Magang Anda masih dalam proses verifikasi.",
+          style: {
+            bg: "bg-amber-50 border-amber-200",
+            text: "text-amber-800",
+            icon: "text-amber-600",
+          },
+        };
     }
-    return null;
   };
 
   const statusMessage = getStatusMessage();
@@ -344,7 +380,9 @@ export function LogbookTable({
       <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
         <p className="text-red-700 mb-4">Error: {error}</p>
         <button
-          onClick={() => fetchLogbooks()}
+          onClick={() =>
+            refreshData(currentPage, entriesPerPage, searchTerm, statusFilter)
+          }
           className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
         >
           Coba Lagi
@@ -355,52 +393,36 @@ export function LogbookTable({
 
   return (
     <div className="space-y-4">
-      {/* Info Status Magang */}
       {statusMessage && (
         <div
-          className={`rounded-xl p-4 flex items-start gap-3 ${
-            statusMessage.type === "info"
-              ? "bg-blue-50 border border-blue-200"
-              : "bg-amber-50 border border-amber-200"
-          }`}
+          className={`rounded-xl p-4 flex items-start gap-3 border ${statusMessage.style.bg}`}
         >
-          <AlertCircle
-            className={`h-5 w-5 flex-shrink-0 mt-0.5 ${
-              statusMessage.type === "info" ? "text-blue-600" : "text-amber-600"
-            }`}
-          />
-          <p
-            className={`text-sm ${
-              statusMessage.type === "info" ? "text-blue-800" : "text-amber-800"
-            }`}
-          >
+          <p className={`text-sm ${statusMessage.style.text}`}>
             {statusMessage.message}
           </p>
         </div>
       )}
 
       <div className="bg-white shadow-sm rounded-xl border border-gray-100 overflow-hidden">
-        {/* Header Card */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-[#4FC3F7]" />
+            <BookOpen className="h-5 w-5 text-[#4FC3F7]" />
             <h2 className="text-lg font-semibold text-gray-900">
               Daftar Logbook Harian
             </h2>
           </div>
 
-          {/* Tombol Tambah Logbook */}
           {showAddButton && (
             <button
               onClick={handleAddLogbook}
-              className="px-4 py-2 bg-[#4FC3F7] text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm hover:shadow"
+              className="px-4 py-2 bg-[#4FC3F7] text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading && isFirstLoad.current}
             >
               <Plus className="h-4 w-4" /> Tambah Logbook
             </button>
           )}
         </div>
 
-        {/* Filter Bar */}
         <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
           <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
             <div className="flex-1">
@@ -409,7 +431,8 @@ export function LogbookTable({
                 placeholder="Cari kegiatan atau kendala..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                disabled={loading && isFirstLoad.current}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -421,7 +444,8 @@ export function LogbookTable({
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  disabled={loading && isFirstLoad.current}
+                  className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value="Semua">Semua</option>
                   <option value="Belum Diverifikasi">Belum Diverifikasi</option>
@@ -439,7 +463,8 @@ export function LogbookTable({
                   onChange={(e) =>
                     handleEntriesPerPageChange(Number(e.target.value))
                   }
-                  className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  disabled={loading && isFirstLoad.current}
+                  className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value={5}>5</option>
                   <option value={10}>10</option>
@@ -450,220 +475,223 @@ export function LogbookTable({
           </div>
         </div>
 
-        {/* Table Container */}
         <div className="overflow-x-auto">
-          {/* Table Header */}
-          <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-white border-b border-gray-200 min-w-[800px]">
-            <div className="col-span-2 text-xs font-semibold text-gray-600 uppercase">
-              Tanggal & Foto
-            </div>
-            <div className="col-span-4 text-xs font-semibold text-gray-600 uppercase">
-              Kegiatan & Kendala
-            </div>
-            <div className="col-span-2 text-xs font-semibold text-gray-600 uppercase text-center">
-              Status
-            </div>
-            <div className="col-span-3 text-xs font-semibold text-gray-600 uppercase">
-              Catatan Verifikasi
-            </div>
-            <div className="col-span-1 text-xs font-semibold text-gray-600 uppercase text-center">
-              Aksi
-            </div>
-          </div>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-white">
+              <tr>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Tanggal & Foto
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Kegiatan & Kendala
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">
+                  Status
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Catatan Verifikasi
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">
+                  Aksi
+                </th>
+              </tr>
+            </thead>
 
-          {/* Table Body */}
-          <div className="divide-y divide-gray-100 min-w-[800px]">
-            {loading ? (
-              <div className="px-6 py-8 text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4FC3F7] mx-auto"></div>
-                <p className="text-gray-500 mt-2">Memuat data logbook...</p>
-              </div>
+            {/* ✅ Loading State hanya untuk initial load */}
+            {loading && isFirstLoad.current ? (
+              <TableLoadingSkeleton />
             ) : logbooks.length === 0 ? (
-              <div className="px-6 py-8 text-center">
-                <p className="text-gray-500">
-                  {searchTerm || statusFilter !== "Semua"
-                    ? "Tidak ada data logbook yang sesuai dengan pencarian"
-                    : "Belum ada data logbook"}
-                </p>
-              </div>
+              <tbody className="bg-white">
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center">
+                    <BookOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500">
+                      {searchTerm || statusFilter !== "Semua"
+                        ? "Tidak ada data logbook yang sesuai dengan pencarian"
+                        : "Belum ada data logbook"}
+                    </p>
+                  </td>
+                </tr>
+              </tbody>
             ) : (
-              logbooks.map((log) => (
-                <div
-                  key={log.id}
-                  className="grid grid-cols-12 gap-4 px-6 py-5 hover:bg-gray-50 transition-colors"
-                >
-                  {/* Tanggal & Foto */}
-                  <div className="col-span-2 flex items-start gap-3">
-                    <div className="h-11 w-11 rounded-lg bg-[#4FC3F7] flex items-center justify-center flex-shrink-0">
-                      <Calendar className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 text-sm leading-tight">
-                        {log.tanggal_formatted}
-                      </p>
-                      {log.file && (
-                        <div className="flex items-center gap-1 mt-1.5">
-                          <Camera className="h-3.5 w-3.5 text-blue-500" />
-                          <span className="text-xs text-blue-600 font-medium">
-                            Ada foto
-                          </span>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {logbooks.map((log) => (
+                  <tr
+                    key={log.id}
+                    className="hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="px-3 py-4 align-top whitespace-nowrap">
+                      <div className="flex items-start space-x-3">
+                        <div className="h-11 w-11 rounded-lg bg-[#4FC3F7] flex items-center justify-center shrink-0">
+                          <Calendar className="h-5 w-5 text-white" />
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Kegiatan & Kendala */}
-                  <div className="col-span-4 space-y-3">
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 mb-1">
-                        Kegiatan:
-                      </p>
-                      <p className="text-sm text-gray-900 line-clamp-2 leading-relaxed">
-                        {log.kegiatan}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 mb-1">
-                        Kendala:
-                      </p>
-                      <p className="text-sm text-gray-900 line-clamp-2 leading-relaxed">
-                        {log.kendala}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Status */}
-                  <div className="col-span-2 flex items-center justify-center">
-                    <span
-                      className={`inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-full ${getStatusClass(
-                        log.status_verifikasi
-                      )}`}
-                    >
-                      {mapStatus(log.status_verifikasi)}
-                    </span>
-                  </div>
-
-                  {/* Catatan Verifikasi */}
-                  <div className="col-span-3 space-y-2">
-                    {log.catatan_guru ? (
-                      <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-lg">
-                        <p className="text-xs font-semibold text-blue-700 mb-1">
-                          Guru:
-                        </p>
-                        <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
-                          {log.catatan_guru}
-                        </p>
+                        <div>
+                          <p className="font-semibold text-gray-900 text-sm leading-tight">
+                            {log.tanggal_formatted}
+                          </p>
+                          {log.file && (
+                            <div className="flex items-center gap-1 mt-1.5">
+                              <Camera className="h-3.5 w-3.5 text-blue-500" />
+                              <span className="text-xs text-blue-600 font-medium">
+                                Ada foto
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ) : null}
-                    {log.catatan_dudi ? (
-                      <div className="bg-purple-50 border border-purple-100 p-2.5 rounded-lg">
-                        <p className="text-xs font-semibold text-purple-700 mb-1">
-                          DUDI:
-                        </p>
-                        <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
-                          {log.catatan_dudi}
-                        </p>
+                    </td>
+
+                    <td className="px-3 py-4 align-top text-sm">
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 mb-1">
+                            Kegiatan:
+                          </p>
+                          <p className="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                            {log.kegiatan}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 mb-1">
+                            Kendala:
+                          </p>
+                          <p className="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                            {log.kendala}
+                          </p>
+                        </div>
                       </div>
-                    ) : null}
-                    {!log.catatan_guru && !log.catatan_dudi && (
-                      <p className="text-xs text-gray-400 italic">
-                        Belum ada catatan
-                      </p>
-                    )}
-                  </div>
+                    </td>
 
-                  {/* Aksi */}
-                  <div className="col-span-1 flex items-center justify-center gap-1">
-                    {/* Tombol Lihat Detail */}
-                    <button
-                      onClick={() => handleViewDetail(log)}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Lihat Detail"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-
-                    {/* Tombol Edit */}
-                    {shouldShowActions(log) && canAddLogbook && (
-                      <button
-                        onClick={() => handleEdit(log)}
-                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                        title="Edit"
+                    <td className="px-3 py-4 align-top whitespace-nowrap text-center">
+                      <span
+                        className={`inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-full ${getStatusClass(
+                          log.status_verifikasi
+                        )}`}
                       >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                    )}
-
-                    {/* Tombol Hapus */}
-                    {shouldShowActions(log) && canAddLogbook && (
-                      <button
-                        onClick={() => handleDelete(log)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Hapus"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-
-                    {/* Pesan jika tidak ada aksi yang tersedia */}
-                    {!shouldShowActions(log) && (
-                      <span className="text-xs text-gray-400 italic">
-                        Tidak ada aksi
+                        {mapStatus(log.status_verifikasi)}
                       </span>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+                    </td>
 
-        {/* Pagination */}
-        {!loading && logbooks.length > 0 && (
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
-            <p className="text-sm text-gray-600">
-              Menampilkan{" "}
-              <span className="font-semibold">{pagination.from}</span> sampai{" "}
-              <span className="font-semibold">{pagination.to}</span> dari{" "}
-              <span className="font-semibold">{pagination.total}</span> logbook
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Sebelumnya
-              </button>
-              {Array.from(
-                { length: pagination.last_page },
-                (_, i) => i + 1
-              ).map((page) => (
+                    <td className="px-3 py-4 align-top text-sm text-gray-600">
+                      <div className="space-y-2">
+                        {log.catatan_guru ? (
+                          <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-lg">
+                            <p className="text-xs font-semibold text-blue-700 mb-1">
+                              Guru:
+                            </p>
+                            <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
+                              {log.catatan_guru}
+                            </p>
+                          </div>
+                        ) : null}
+                        {log.catatan_dudi ? (
+                          <div className="bg-purple-50 border border-purple-100 p-2.5 rounded-lg">
+                            <p className="text-xs font-semibold text-purple-700 mb-1">
+                              DUDI:
+                            </p>
+                            <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
+                              {log.catatan_dudi}
+                            </p>
+                          </div>
+                        ) : null}
+                        {!log.catatan_guru && !log.catatan_dudi && (
+                          <p className="text-xs text-gray-400 italic">
+                            Belum ada catatan
+                          </p>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-3 py-4 align-top whitespace-nowrap text-center text-sm font-medium">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleViewDetail(log)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Lihat Detail"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+
+                        {shouldShowActions(log) && canAddLogbook && (
+                          <button
+                            onClick={() => handleEdit(log)}
+                            className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        {shouldShowActions(log) && canAddLogbook && (
+                          <button
+                            onClick={() => handleDelete(log)}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Hapus"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        {!shouldShowActions(log) && (
+                          <span className="text-xs text-gray-400 italic">
+                            Tidak ada aksi
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            )}
+          </table>
+
+          {/* Pagination */}
+          {logbooks.length > 0 && (
+            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+              <p className="text-sm text-gray-600">
+                Menampilkan{" "}
+                <span className="font-semibold">{pagination.from}</span> sampai{" "}
+                <span className="font-semibold">{pagination.to}</span> dari{" "}
+                <span className="font-semibold">{pagination.total}</span>{" "}
+                logbook
+              </p>
+              <div className="flex gap-2">
                 <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
-                    currentPage === page
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "border-gray-300 hover:bg-gray-50"
-                  }`}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {page}
+                  Sebelumnya
                 </button>
-              ))}
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === pagination.last_page}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Selanjutnya
-              </button>
+                {Array.from(
+                  { length: pagination.last_page },
+                  (_, i) => i + 1
+                ).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => handlePageChange(page)}
+                    className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                      currentPage === page
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === pagination.last_page}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Selanjutnya
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Modal Update Logbook */}
       <LogbookUpdateModal
         isOpen={showUpdateModal}
         onClose={() => {
@@ -674,7 +702,6 @@ export function LogbookTable({
         logbook={selectedLogbook}
       />
 
-      {/* Modal Tambah Logbook */}
       <TambahLogbookModal
         open={showTambahModal}
         onOpenChange={setShowTambahModal}

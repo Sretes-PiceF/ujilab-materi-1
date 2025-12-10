@@ -11,8 +11,6 @@ use Illuminate\Support\Facades\Validator;
 
 class DudiSiswaController extends Controller
 {
-    // app/Http/Controllers/DudiSiswaController.php
-    // app/Http/Controllers/DudiSiswaController.php
     public function getDudiAktif(Request $request)
     {
         try {
@@ -26,9 +24,18 @@ class DudiSiswaController extends Controller
                 ], 404);
             }
 
-            // Cek apakah siswa sudah memiliki magang aktif
+            // ===== PENGECEKAN MAGANG SELESAI (BARU) =====
+            $magangSelesai = Magang::where('siswa_id', $siswa->id)
+                ->where('status', 'selesai')
+                ->with('dudi')
+                ->first();
+
+            $sudahPernahMagang = (bool) $magangSelesai;
+
+            // ===== PENGECEKAN MAGANG AKTIF =====
             $magangAktif = Magang::where('siswa_id', $siswa->id)
                 ->whereIn('status', ['diterima', 'berlangsung'])
+                ->with('dudi')
                 ->first();
 
             $sudahPunyaMagangAktif = (bool) $magangAktif;
@@ -37,6 +44,15 @@ class DudiSiswaController extends Controller
             $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
                 ->whereIn('status', ['pending', 'diterima'])
                 ->count();
+
+            // ===== LOGIKA BISA DAFTAR (DIPERBARUI) =====
+            // Siswa bisa daftar jika:
+            // 1. BELUM PERNAH SELESAI MAGANG (paling penting!)
+            // 2. Tidak punya magang aktif
+            // 3. Belum mencapai batas maksimal pendaftaran (3)
+            $bisaDaftar = !$sudahPernahMagang
+                && !$sudahPunyaMagangAktif
+                && $jumlahPendaftaran < 3;
 
             // Get DUDI aktif - TANPA FILTER KUOTA
             $dudiAktif = Dudi::where('status', 'aktif')
@@ -63,7 +79,6 @@ class DudiSiswaController extends Controller
                         'telepon' => $dudi->telepon,
                         'email' => $dudi->email,
                         'penanggung_jawab' => $dudi->penanggung_jawab,
-                        // Field dengan nilai default
                         'website' => null,
                         'bidang_usaha' => 'Perusahaan Mitra',
                         'deskripsi' => 'Perusahaan mitra magang siswa SMK Negeri 6 Malang',
@@ -74,7 +89,7 @@ class DudiSiswaController extends Controller
                         ],
                         'fasilitas' => [],
                         'persyaratan' => [],
-                        'sudah_daftar' => $sudahDaftar, // Ini yang penting untuk tombol
+                        'sudah_daftar' => $sudahDaftar,
                         'status_dudi' => $dudi->status
                     ];
                 });
@@ -85,13 +100,31 @@ class DudiSiswaController extends Controller
                     'dudi_aktif' => $dudiAktif,
                     'jumlah_pendaftaran' => $jumlahPendaftaran,
                     'maksimal_pendaftaran' => 3,
-                    'bisa_daftar' => !$sudahPunyaMagangAktif && $jumlahPendaftaran < 3,
+                    'bisa_daftar' => $bisaDaftar,
+
+                    // Info magang aktif
                     'sudah_punya_magang_aktif' => $sudahPunyaMagangAktif,
                     'magang_aktif' => $sudahPunyaMagangAktif ? [
                         'id' => $magangAktif->id,
                         'status' => $magangAktif->status,
+                        'tanggal_mulai' => $magangAktif->tanggal_mulai,
+                        'tanggal_selesai' => $magangAktif->tanggal_selesai,
                         'dudi' => [
                             'nama_perusahaan' => $magangAktif->dudi->nama_perusahaan ?? 'Tidak diketahui',
+                            'bidang_usaha' => 'Perusahaan Mitra'
+                        ]
+                    ] : null,
+
+                    // ===== INFO MAGANG SELESAI (BARU) =====
+                    'sudah_pernah_magang' => $sudahPernahMagang,
+                    'magang_selesai' => $sudahPernahMagang ? [
+                        'id' => $magangSelesai->id,
+                        'status' => $magangSelesai->status,
+                        'tanggal_mulai' => $magangSelesai->tanggal_mulai,
+                        'tanggal_selesai' => $magangSelesai->tanggal_selesai,
+                        'nilai_akhir' => $magangSelesai->nilai_akhir,
+                        'dudi' => [
+                            'nama_perusahaan' => $magangSelesai->dudi->nama_perusahaan ?? 'Tidak diketahui',
                             'bidang_usaha' => 'Perusahaan Mitra'
                         ]
                     ] : null
@@ -107,7 +140,7 @@ class DudiSiswaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengambil data DUDI',
-                'error' => $e->getMessage()
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -187,7 +220,19 @@ class DudiSiswaController extends Controller
                 ], 404);
             }
 
-            // Cek apakah DUDI aktif
+            // ===== VALIDASI 1: CEK SUDAH PERNAH MAGANG SELESAI (PRIORITAS TERTINGGI) =====
+            $sudahPernahMagang = Magang::where('siswa_id', $siswa->id)
+                ->where('status', 'selesai')
+                ->exists();
+
+            if ($sudahPernahMagang) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda sudah pernah menyelesaikan magang dan tidak dapat mendaftar lagi. Setiap siswa hanya diperbolehkan magang satu kali.'
+                ], 403); // 403 Forbidden
+            }
+
+            // ===== VALIDASI 2: CEK DUDI AKTIF =====
             $dudi = Dudi::where('status', 'aktif')->find($dudi_id);
 
             if (!$dudi) {
@@ -197,12 +242,12 @@ class DudiSiswaController extends Controller
                 ], 404);
             }
 
-            // Cek kuota dengan menghitung siswa aktif
+            // ===== VALIDASI 3: CEK KUOTA DUDI =====
             $kuotaTerisi = Magang::where('dudi_id', $dudi_id)
                 ->whereIn('status', [Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
                 ->count();
 
-            $kuotaTotal = 10; // Default kuota, bisa disesuaikan dengan field di tabel dudi jika ada
+            $kuotaTotal = 10; // Default kuota
 
             if ($kuotaTerisi >= $kuotaTotal) {
                 return response()->json([
@@ -211,7 +256,7 @@ class DudiSiswaController extends Controller
                 ], 400);
             }
 
-            // Cek apakah siswa sudah memiliki magang aktif
+            // ===== VALIDASI 4: CEK MAGANG AKTIF =====
             $magangAktif = Magang::where('siswa_id', $siswa->id)
                 ->whereIn('status', [Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
                 ->first();
@@ -219,11 +264,11 @@ class DudiSiswaController extends Controller
             if ($magangAktif) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Anda sudah memiliki magang aktif'
+                    'message' => 'Anda sudah memiliki magang aktif di ' . ($magangAktif->dudi->nama_perusahaan ?? 'perusahaan lain')
                 ], 400);
             }
 
-            // Cek apakah sudah mendaftar ke DUDI ini (dalam status pending atau diterima)
+            // ===== VALIDASI 5: CEK SUDAH DAFTAR KE DUDI INI =====
             $sudahDaftar = Magang::where('siswa_id', $siswa->id)
                 ->where('dudi_id', $dudi_id)
                 ->whereIn('status', [Magang::STATUS_PENDING, Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
@@ -236,7 +281,7 @@ class DudiSiswaController extends Controller
                 ], 400);
             }
 
-            // Cek jumlah pendaftaran (maksimal 3)
+            // ===== VALIDASI 6: CEK BATAS MAKSIMAL PENDAFTARAN =====
             $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
                 ->whereIn('status', [Magang::STATUS_PENDING, Magang::STATUS_DITERIMA])
                 ->count();
@@ -248,19 +293,28 @@ class DudiSiswaController extends Controller
                 ], 400);
             }
 
-            // Buat pendaftaran magang (sesuai dengan fillable di Model)
+            // ===== SEMUA VALIDASI LOLOS, BUAT PENDAFTARAN =====
             $magang = Magang::create([
                 'siswa_id' => $siswa->id,
                 'dudi_id' => $dudi_id,
-                'guru_id' => null, // Akan di-assign nanti oleh admin/dudi
+                'guru_id' => null, // Akan di-assign nanti
                 'status' => Magang::STATUS_PENDING,
                 'nilai_akhir' => null,
-                'tanggal_mulai' => null, // Akan di-set setelah diterima
-                'tanggal_selesai' => null, // Akan di-set setelah diterima
+                'tanggal_mulai' => null,
+                'tanggal_selesai' => null,
             ]);
 
-            // Refresh model untuk memastikan data ter-load dengan benar
+            // Refresh model
             $magang->refresh();
+
+            // Log aktivitas
+            Log::info('Pendaftaran magang baru', [
+                'siswa_id' => $siswa->id,
+                'dudi_id' => $dudi_id,
+                'magang_id' => $magang->id,
+                'nama_siswa' => $siswa->nama ?? $user->name,
+                'nama_dudi' => $dudi->nama_perusahaan
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -272,15 +326,21 @@ class DudiSiswaController extends Controller
                     'tanggal_daftar' => $magang->created_at->format('Y-m-d H:i:s'),
                     'dudi' => [
                         'nama_perusahaan' => $dudi->nama_perusahaan,
-                        'bidang_usaha' => $dudi->bidang_usaha ?? 'Perusahaan Mitra'
+                        'bidang_usaha' => $dudi->bidang_usaha ?? 'Perusahaan Mitra',
+                        'alamat' => $dudi->alamat,
+                        'penanggung_jawab' => $dudi->penanggung_jawab
                     ]
                 ],
-                'message' => 'Pendaftaran magang berhasil dikirim'
-            ], 201); // Status code 201 untuk created
+                'message' => 'Pendaftaran magang berhasil dikirim. Menunggu verifikasi dari perusahaan.'
+            ], 201); // 201 Created
 
         } catch (\Exception $e) {
             Log::error('Error in store magang: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Request data: ' . json_encode([
+                'dudi_id' => $dudi_id,
+                'user_id' => Auth::id()
+            ]));
 
             return response()->json([
                 'success' => false,

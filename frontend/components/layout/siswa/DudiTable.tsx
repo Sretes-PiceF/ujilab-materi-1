@@ -1,6 +1,7 @@
 // components/layout/siswa/DudiTable.tsx
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+// ... (imports lainnya tetap sama)
 import {
   Building2,
   MapPin,
@@ -11,6 +12,10 @@ import {
   Check,
   AlertCircle,
 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
+
+// ... (Interface DudiData dan DudiTableProps tetap sama)
+// ... (Komponen SkeletonCard tetap sama)
 
 // Interface untuk data DUDI dari API
 interface DudiData {
@@ -39,9 +44,61 @@ interface DudiTableProps {
   onViewDetail?: (dudi: DudiData) => void;
 }
 
+// Skeleton Card Component
+const SkeletonCard = () => (
+  <div className="bg-white shadow-sm rounded-xl p-5 border border-gray-100 animate-pulse">
+    {/* Header Skeleton */}
+    <div className="flex items-start gap-3 mb-4">
+      <div className="h-10 w-10 rounded-lg bg-gray-200"></div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+      </div>
+    </div>
+
+    {/* Address & PIC Skeleton */}
+    <div className="space-y-2 mb-4">
+      <div className="flex items-start gap-2">
+        <div className="h-4 w-4 bg-gray-200 rounded mt-0.5"></div>
+        <div className="flex-1 space-y-1">
+          <div className="h-3 bg-gray-200 rounded w-full"></div>
+          <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="h-4 w-4 bg-gray-200 rounded"></div>
+        <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+      </div>
+    </div>
+
+    {/* Quota Skeleton */}
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1">
+        <div className="h-3 bg-gray-200 rounded w-20"></div>
+        <div className="h-3 bg-gray-200 rounded w-12"></div>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2"></div>
+      <div className="h-2 bg-gray-200 rounded w-16 mt-1"></div>
+    </div>
+
+    {/* Description Skeleton */}
+    <div className="space-y-2 mb-4">
+      <div className="h-2 bg-gray-200 rounded w-full"></div>
+      <div className="h-2 bg-gray-200 rounded w-full"></div>
+      <div className="h-2 bg-gray-200 rounded w-3/4"></div>
+    </div>
+
+    {/* Buttons Skeleton */}
+    <div className="flex justify-between items-center">
+      <div className="h-6 bg-gray-200 rounded w-12"></div>
+      <div className="h-7 bg-gray-200 rounded w-20"></div>
+    </div>
+  </div>
+);
+
 export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
   const [dudiData, setDudiData] = useState<DudiData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Default ke true untuk initial load
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<{
     message: string;
@@ -53,16 +110,16 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
   const [maksimalPendaftaran, setMaksimalPendaftaran] = useState(3);
   const [bisaDaftar, setBisaDaftar] = useState(true);
   const [sudahPunyaMagangAktif, setSudahPunyaMagangAktif] = useState(false);
+  const [sudahPernahMagang, setSudahPernahMagang] = useState(false);
   const [magangAktif, setMagangAktif] = useState<any>(null);
+  const [magangSelesai, setMagangSelesai] = useState<any>(null);
 
-  // Fetch data DUDI aktif dari API
-  const fetchDudiAktif = async () => {
+  // **********************************************
+  // 💡 FUNGSI INI HANYA UNTUK FETCH DATA, TIDAK ADA LOGIKA LOADING/ERROR
+  // **********************************************
+  const fetchDudi = useCallback(async () => {
+    const token = localStorage.getItem("access_token");
     try {
-      setLoading(true);
-      setError(null);
-
-      // Simulasi API call - ganti dengan API real Anda
-      const token = localStorage.getItem("access_token");
       const response = await fetch(
         `${
           process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
@@ -78,7 +135,6 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
 
       if (response.ok) {
         const result = await response.json();
-
         if (result.success) {
           setDudiData(result.data.dudi_aktif || []);
           setJumlahPendaftaran(result.data.jumlah_pendaftaran || 0);
@@ -88,81 +144,110 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
             result.data.sudah_punya_magang_aktif || false
           );
           setMagangAktif(result.data.magang_aktif || null);
+          setSudahPernahMagang(result.data.sudah_pernah_magang || false);
+          setMagangSelesai(result.data.magang_selesai || null);
+          return { success: true };
         } else {
-          // Fallback ke dummy data jika API error
-          setDudiData(dummyDudiData);
-          setJumlahPendaftaran(1);
-          setMaksimalPendaftaran(3);
-          setBisaDaftar(true);
-          setSudahPunyaMagangAktif(false);
+          return {
+            success: false,
+            message: result.message || "Gagal mengambil data DUDI",
+          };
         }
       } else {
-        // Fallback ke dummy data jika API tidak tersedia
-        setDudiData(dummyDudiData);
-        setJumlahPendaftaran(1);
-        setMaksimalPendaftaran(3);
-        setBisaDaftar(true);
-        setSudahPunyaMagangAktif(false);
+        return { success: false, message: "Gagal terhubung ke server" };
       }
     } catch (err: any) {
       console.error("Error fetching DUDI data:", err);
-      // Fallback ke dummy data
-      setDudiData(dummyDudiData);
-      setJumlahPendaftaran(1);
-      setMaksimalPendaftaran(3);
-      setBisaDaftar(true);
-      setSudahPunyaMagangAktif(false);
-    } finally {
-      setLoading(false);
+      return {
+        success: false,
+        message: "Terjadi kesalahan saat mengambil data",
+      };
     }
-  };
-
-  useEffect(() => {
-    fetchDudiAktif();
   }, []);
 
-  // Dummy data sebagai fallback
-  const dummyDudiData: DudiData[] = [
-    {
-      id: 1,
-      nama_perusahaan: "PT Kreatif Teknologi",
-      alamat: "Jl. Merdeka No. 123, Jakarta",
-      telepon: "(021) 1234567",
-      email: "info@kreatiftekno.com",
-      penanggung_jawab: "Andi Wijaya",
-      status_dudi: "aktif",
-      bidang_usaha: "Teknologi Informasi",
-      deskripsi:
-        "Perusahaan teknologi yang bergerak dalam pengembangan aplikasi web dan mobile. Memberikan kesempatan magang bagi siswa SMK jurusan RPL.",
-      kuota: { terisi: 8, total: 12, tersisa: 4 },
-      fasilitas: ["Laptop", "Internet", "Makan Siang"],
-      persyaratan: ["Surat Pengantar", "CV", "Transkrip Nilai"],
-      sudah_daftar: false,
-    },
-  ];
+  // **********************************************
+  // 💡 FUNGSI INI DIGUNAKAN UNTUK INITIAL LOAD DAN MANUAL REFRESH (Tombol Coba Lagi)
+  // **********************************************
+  const fetchDudiAktif = useCallback(async () => {
+    // Hanya set loading=true jika belum pernah selesai loading
+    // Jika dipanggil dari tombol 'Coba Lagi' saat error, set true.
+    if (dudiData.length === 0 && !error) {
+      setLoading(true);
+    }
+    setError(null);
 
-  // Filter data berdasarkan pencarian
-  const filteredData = dudiData.filter(
-    (dudi) =>
-      dudi.nama_perusahaan.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      dudi.bidang_usaha.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      dudi.alamat.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    const result = await fetchDudi();
 
-  // Pagination
-  const paginatedData = filteredData.slice(0, entriesPerPage);
+    if (!result.success) {
+      setError(result.message);
+    }
 
-  // Fungsi untuk menampilkan notifikasi
-  const showNotification = (message: string, type: "success" | "error") => {
-    setNotification({ message, type });
-    setTimeout(() => {
-      setNotification(null);
-    }, 3000);
-  };
+    // Pastikan loading dimatikan setelah fetch pertama
+    setLoading(false);
+  }, [fetchDudi, dudiData.length, error]); // Tambahkan dependensi fetchDudi
 
-  // Handler untuk mendaftar ke DUDI
+  // Initial fetch
+  useEffect(() => {
+    // Hanya dipanggil sekali saat komponen pertama kali dimuat
+    fetchDudiAktif();
+  }, [fetchDudiAktif]); // Dependensi fetchDudiAktif
+
+  // Real-time subscription untuk DUDI dan Magang
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("dudi-magang-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "dudi",
+        },
+        async (payload) => {
+          console.log("DUDI changed (Real-time):", payload);
+          // 💡 Menggunakan fetchDudi() yang tidak mengaktifkan loading skeleton
+          await fetchDudi();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "magang",
+        },
+        async (payload) => {
+          console.log("Magang changed (Real-time):", payload);
+          // 💡 Menggunakan fetchDudi() yang tidak mengaktifkan loading skeleton
+          await fetchDudi();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchDudi]); // Dependensi fetchDudi
+
+  // ... (Logika Filter data, Pagination, dan showNotification tetap sama)
+  // ... (Handler handleApply diubah sedikit)
+
   // Handler untuk mendaftar ke DUDI
   const handleApply = async (dudiId: number) => {
+    // ... (Logika pengecekan tetap sama)
+    if (sudahPernahMagang) {
+      showNotification(
+        "Anda sudah pernah menyelesaikan magang dan tidak dapat mendaftar lagi",
+        "error"
+      );
+      return;
+    }
+
     if (!bisaDaftar) {
       showNotification(
         `Anda sudah mencapai batas maksimal pendaftaran (${maksimalPendaftaran} DUDI)`,
@@ -191,11 +276,9 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
             Accept: "application/json",
             "ngrok-skip-browser-warning": "true",
           },
-          // Tidak perlu mengirim body karena backend hanya butuh dudi_id dari URL
         }
       );
 
-      // Parse response JSON terlebih dahulu
       let result;
       try {
         result = await response.json();
@@ -208,39 +291,34 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
         return;
       }
 
-      // Cek apakah sukses berdasarkan response
       if (response.ok && result.success) {
-        // Update UI dulu untuk instant feedback
+        // Update UI untuk instant feedback
         setDudiData((prevData) =>
           prevData.map((dudi) =>
             dudi.id === dudiId ? { ...dudi, sudah_daftar: true } : dudi
           )
         );
 
-        // Update jumlah pendaftaran
         setJumlahPendaftaran((prev) => prev + 1);
 
-        // Cek apakah sudah mencapai batas maksimal
         if (jumlahPendaftaran + 1 >= maksimalPendaftaran) {
           setBisaDaftar(false);
         }
 
-        // Tampilkan notifikasi sukses
         showNotification(
           "Pendaftaran magang berhasil dikirim! Menunggu verifikasi dari perusahaan.",
           "success"
         );
 
-        // Refresh data dari API untuk sinkronisasi setelah delay
-        setTimeout(async () => {
-          await fetchDudiAktif();
+        // 💡 Menggunakan fetchDudi() untuk auto-refresh tanpa loading skeleton
+        setTimeout(() => {
+          fetchDudi();
         }, 1000);
 
         if (onApply) {
           onApply(dudiId);
         }
       } else {
-        // Tampilkan pesan error dari backend
         const errorMessage = result.message || "Gagal mengirim pendaftaran";
         showNotification(errorMessage, "error");
         console.error("Backend error:", result);
@@ -254,25 +332,37 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
     }
   };
 
+  // ... (Handler handleViewDetail tetap sama)
+  // ... (Bagian render tetap sama)
+
+  // ... (Sisanya dari komponen DudiTable)
+  const filteredData = dudiData.filter(
+    (dudi) =>
+      dudi.nama_perusahaan.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      dudi.bidang_usaha.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      dudi.alamat.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Pagination
+  const paginatedData = filteredData.slice(0, entriesPerPage);
+
+  // Fungsi untuk menampilkan notifikasi
+  const showNotification = (message: string, type: "success" | "error") => {
+    setNotification({ message, type });
+    setTimeout(() => {
+      setNotification(null);
+    }, 3000);
+  };
+
   // Handler untuk melihat detail DUDI
   const handleViewDetail = (dudi: DudiData) => {
     if (onViewDetail) {
       onViewDetail(dudi);
     } else {
       console.log("View detail DUDI:", dudi);
-      // Bisa ditambahkan modal atau navigasi ke halaman detail
       showNotification(`Melihat detail ${dudi.nama_perusahaan}`, "success");
     }
   };
-
-  // if (loading) {
-  //     return (
-  //         <div className="flex items-center justify-center min-h-[400px]">
-  //             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-  //             <span className="ml-3 text-gray-600">Memuat data DUDI...</span>
-  //         </div>
-  //     );
-  // }
 
   if (error) {
     return (
@@ -293,27 +383,76 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
 
   return (
     <>
-      {/* Info Status Magang Aktif */}
-      {sudahPunyaMagangAktif && magangAktif && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+      {/* Info Magang Selesai */}
+      {sudahPernahMagang && magangSelesai && (
+        <div className="bg-green-50 border border-green-300 rounded-xl p-4 mb-6">
           <div className="flex items-center gap-3">
-            <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+            <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+            <div className="flex-1">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-sm text-green-800 font-medium">
+                    Selamat! Anda telah menyelesaikan program magang
+                  </p>
+                  <p className="text-xs text-green-600 mt-1">
+                    DUDI:{" "}
+                    <span className="font-medium">
+                      {magangSelesai.dudi?.nama_perusahaan}
+                    </span>{" "}
+                    • Bidang:{" "}
+                    <span className="font-medium">
+                      {magangSelesai.dudi?.bidang_usaha}
+                    </span>{" "}
+                    • Status:{" "}
+                    <span className="font-medium capitalize">
+                      {magangSelesai.status}
+                    </span>
+                  </p>
+                  {magangSelesai.tanggal_mulai &&
+                    magangSelesai.tanggal_selesai && (
+                      <p className="text-xs text-green-500 mt-1">
+                        Periode: {magangSelesai.tanggal_mulai} -{" "}
+                        {magangSelesai.tanggal_selesai}
+                      </p>
+                    )}
+                </div>
+                <span className="px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full">
+                  Selesai
+                </span>
+              </div>
+              <div className="mt-2 pt-2 border-t border-green-200">
+                <p className="text-xs text-green-600">
+                  ⓘ Anda tidak dapat mendaftar magang lagi karena sudah
+                  menyelesaikan program magang. Setiap siswa hanya diperbolehkan
+                  magang satu kali.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Info Status Magang Aktif */}
+      {sudahPunyaMagangAktif && magangAktif && !sudahPernahMagang && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <Check className="h-5 w-5 text-blue-600 flex-shrink-0" />
             <div>
-              <p className="text-sm text-green-800 font-medium">
+              <p className="text-sm text-blue-800 font-medium">
                 Anda sudah memiliki magang aktif
               </p>
-              <p className="text-xs text-green-600 mt-1">
+              <p className="text-xs text-blue-600 mt-1">
                 Status:{" "}
                 <span className="font-medium capitalize">
                   {magangAktif.status}
                 </span>{" "}
                 • DUDI:{" "}
                 <span className="font-medium">
-                  {magangAktif.dudi.nama_perusahaan}
+                  {magangAktif.dudi?.nama_perusahaan}
                 </span>{" "}
                 • Bidang:{" "}
                 <span className="font-medium">
-                  {magangAktif.dudi.bidang_usaha}
+                  {magangAktif.dudi?.bidang_usaha}
                 </span>
               </p>
             </div>
@@ -321,27 +460,29 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
         </div>
       )}
 
-      {/* Info Pendaftaran */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-        <div className="flex items-center gap-3">
-          <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0" />
-          <div>
-            <p className="text-sm text-blue-800 font-medium">
-              Status Pendaftaran: {jumlahPendaftaran} dari {maksimalPendaftaran}{" "}
-              DUDI
-            </p>
-            <p className="text-xs text-blue-600 mt-1">
-              {bisaDaftar && !sudahPunyaMagangAktif
-                ? `Anda masih bisa mendaftar ke ${
-                    maksimalPendaftaran - jumlahPendaftaran
-                  } DUDI lainnya`
-                : sudahPunyaMagangAktif
-                ? "Anda sudah memiliki magang aktif dan tidak bisa mendaftar lagi"
-                : "Anda sudah mencapai batas maksimal pendaftaran"}
-            </p>
+      {/* Info Pendaftaran - Hanya tampil jika belum pernah magang */}
+      {!sudahPernahMagang && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm text-blue-800 font-medium">
+                Status Pendaftaran: {jumlahPendaftaran} dari{" "}
+                {maksimalPendaftaran} DUDI
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                {bisaDaftar && !sudahPunyaMagangAktif
+                  ? `Anda masih bisa mendaftar ke ${
+                      maksimalPendaftaran - jumlahPendaftaran
+                    } DUDI lainnya`
+                  : sudahPunyaMagangAktif
+                  ? "Anda sudah memiliki magang aktif dan tidak bisa mendaftar lagi"
+                  : "Anda sudah mencapai batas maksimal pendaftaran"}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Search & Pagination */}
       <div className="bg-white shadow-sm rounded-xl p-4 mb-6 flex flex-col sm:flex-row gap-4 items-center">
@@ -371,7 +512,14 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
 
       {/* DUDI Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {paginatedData.length === 0 ? (
+        {loading ? (
+          // Skeleton Loading - Tampilkan 6 skeleton cards
+          <>
+            {[...Array(6)].map((_, index) => (
+              <SkeletonCard key={index} />
+            ))}
+          </>
+        ) : paginatedData.length === 0 ? (
           <div className="col-span-full text-center py-12">
             <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500 text-lg mb-2">
@@ -459,7 +607,13 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
                 </button>
 
                 {/* Tombol Daftar dengan berbagai kondisi */}
-                {dudi.sudah_daftar ? (
+                {sudahPernahMagang ? (
+                  // Jika sudah pernah magang (selesai)
+                  <button className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-lg cursor-not-allowed transition-colors flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-green-600" />
+                    Selesai Magang
+                  </button>
+                ) : dudi.sudah_daftar ? (
                   <button className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 rounded-lg cursor-not-allowed flex items-center gap-1">
                     <CheckCircle className="h-3 w-3" /> Sudah Mendaftar
                   </button>
@@ -478,7 +632,7 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
                 ) : (
                   <button
                     onClick={() => handleApply(dudi.id)}
-                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1"
                   >
                     <ArrowRight className="h-3 w-3" /> Daftar
                   </button>
@@ -490,7 +644,7 @@ export function DudiTable({ onApply, onViewDetail }: DudiTableProps) {
       </div>
 
       {/* Pagination Info */}
-      {filteredData.length > entriesPerPage && (
+      {!loading && filteredData.length > entriesPerPage && (
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
             Menampilkan {paginatedData.length} dari {filteredData.length}{" "}
