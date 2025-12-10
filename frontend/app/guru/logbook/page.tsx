@@ -3,8 +3,9 @@
 import { CardStats } from "@/components/ui/CardStats";
 import { LogbookTable } from "@/components/layout/guru/LogbookTable";
 import { ThumbsUp, ThumbsDown, BookOpen, Clock } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/lib/supabaseClient";
 
 // Interface untuk data stats logbook
 interface LogbookStatsData {
@@ -25,7 +26,7 @@ export default function LogBookPage() {
   });
   const [loading, setLoading] = useState(true);
 
-  const fetchLogbookStats = async () => {
+  const fetchLogbookStats = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem("access_token");
@@ -67,11 +68,69 @@ export default function LogBookPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchLogbookStats();
-  }, []);
+  }, [fetchLogbookStats]);
+
+  // Real-time subscription untuk update data Logbook
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("logbook-stats-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "logbook",
+        },
+        async () => {
+          console.log("New logbook added, refreshing stats...");
+          await fetchLogbookStats();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "logbook",
+        },
+        async (payload) => {
+          // Hanya refresh jika status verifikasi berubah
+          if (
+            payload.new.status_verifikasi !== payload.old?.status_verifikasi
+          ) {
+            console.log("Logbook status changed, refreshing stats...");
+            await fetchLogbookStats();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "logbook",
+        },
+        async () => {
+          console.log("Logbook deleted, refreshing stats...");
+          await fetchLogbookStats();
+        }
+      )
+      .subscribe((status) => {
+        console.log("Supabase Logbook stats subscription status:", status);
+      });
+
+    return () => {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [fetchLogbookStats]);
 
   return (
     <div className="p-8">

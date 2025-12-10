@@ -578,7 +578,6 @@
 
 // export default LogbookDetailModal;
 
-// /components/layout/guru/detail/LogbookDetail.tsx
 import React, { useState, useEffect } from "react";
 import { LogbookEntry } from "@/types/logbook";
 import { Button } from "@/components/ui/button";
@@ -832,6 +831,7 @@ const LogbookDetailModal: React.FC<LogbookDetailModalProps> = ({
                   ) : proxyImageSrc && !imageError ? (
                     <Image
                       src={proxyImageSrc}
+                      fill
                       alt={`Foto dokumentasi logbook ${entry.id}`}
                       className="w-full h-full object-contain"
                       onError={() => setImageError(true)}

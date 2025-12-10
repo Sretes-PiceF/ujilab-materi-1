@@ -49,6 +49,48 @@ const getStatusLabel = (status: LogbookEntry["status_verifikasi"]) => {
   }
 };
 
+// Komponen Loading Skeleton
+const TableLoadingSkeleton = () => {
+  return (
+    <tbody className="bg-white divide-y divide-gray-100">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <tr key={i} className="animate-pulse">
+          <td className="px-3 py-4">
+            <div className="flex items-start space-x-3">
+              <div className="h-9 w-9 bg-gray-200 rounded-full shrink-0"></div>
+              <div className="space-y-2 flex-1">
+                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+              </div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-full"></div>
+              <div className="h-4 bg-gray-200 rounded w-5/6"></div>
+              <div className="h-4 bg-gray-200 rounded w-full"></div>
+              <div className="h-4 bg-gray-200 rounded w-4/5"></div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="h-6 bg-gray-200 rounded-lg w-24"></div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-full"></div>
+              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            </div>
+          </td>
+          <td className="px-3 py-4">
+            <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  );
+};
+
 export function LogbookTable() {
   const { logbookList, meta, error, fetchLogbook } = useLogbook();
 
@@ -57,6 +99,8 @@ export function LogbookTable() {
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [processing, setProcessing] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // State untuk modal
   const [selectedUpdateLogbook, setSelectedUpdateLogbook] =
@@ -67,19 +111,45 @@ export function LogbookTable() {
   const [selectedDetailLogbook, setSelectedDetailLogbook] =
     useState<LogbookEntry | null>(null);
 
+  // Initial load
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      try {
+        await fetchLogbook({
+          page: currentPage,
+          per_page: entriesPerPage,
+          search: searchTerm,
+          status: statusFilter,
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadInitialData();
+  }, []);
+
   // Debounced search
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchLogbook({
-        page: currentPage,
-        per_page: entriesPerPage,
-        search: searchTerm,
-        status: statusFilter,
-      });
+    if (isLoading) return; // Skip jika masih loading awal
+
+    const timer = setTimeout(async () => {
+      setIsRefreshing(true);
+      try {
+        await fetchLogbook({
+          page: currentPage,
+          per_page: entriesPerPage,
+          search: searchTerm,
+          status: statusFilter,
+        });
+      } finally {
+        setIsRefreshing(false);
+      }
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter, entriesPerPage, currentPage, fetchLogbook]);
+  }, [searchTerm, statusFilter, entriesPerPage, currentPage]);
 
   // Real-time subscription
   useEffect(() => {
@@ -366,7 +436,8 @@ export function LogbookTable() {
                 placeholder="Cari siswa, kegiatan, atau kendala..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#0097BB] focus:border-transparent transition-colors shadow-sm"
+                disabled={isLoading}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#0097BB] focus:border-transparent transition-colors shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -379,7 +450,8 @@ export function LogbookTable() {
                   id="filter-status"
                   value={statusFilter}
                   onChange={(e) => handleStatusChange(e.target.value)}
-                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm"
+                  disabled={isLoading}
+                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value="all">Semua</option>
                   <option value="pending">Belum Diverifikasi</option>
@@ -401,7 +473,8 @@ export function LogbookTable() {
                   onChange={(e) =>
                     handleEntriesPerPageChange(Number(e.target.value))
                   }
-                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm"
+                  disabled={isLoading}
+                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value={5}>5</option>
                   <option value={10}>10</option>
@@ -435,8 +508,11 @@ export function LogbookTable() {
                 </tr>
               </thead>
 
-              <tbody className="bg-white divide-y divide-gray-100">
-                {logbookList.length === 0 ? (
+              {/* Loading State */}
+              {isLoading ? (
+                <TableLoadingSkeleton />
+              ) : logbookList.length === 0 ? (
+                <tbody className="bg-white">
                   <tr>
                     <td colSpan={5} className="px-3 py-8 text-center">
                       <BookOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
@@ -447,8 +523,10 @@ export function LogbookTable() {
                       </p>
                     </td>
                   </tr>
-                ) : (
-                  logbookList.map((entry) => (
+                </tbody>
+              ) : (
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {logbookList.map((entry) => (
                     <tr
                       key={entry.id}
                       className="hover:bg-gray-50 transition-colors"
@@ -569,13 +647,13 @@ export function LogbookTable() {
                         </div>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
+                  ))}
+                </tbody>
+              )}
             </table>
 
             {/* Pagination */}
-            {logbookList.length > 0 && (
+            {!isLoading && logbookList.length > 0 && (
               <div className="flex justify-between items-center pt-4 border-t border-gray-200 mt-4 text-sm text-gray-600">
                 <span>
                   Menampilkan {meta.from || 0} sampai {meta.to || 0} dari{" "}
@@ -584,7 +662,7 @@ export function LogbookTable() {
                 <div className="flex space-x-1">
                   <button
                     onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1}
+                    disabled={currentPage === 1 || isRefreshing}
                     className="p-2 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     &lt;
@@ -593,7 +671,8 @@ export function LogbookTable() {
                     <button
                       key={page}
                       onClick={() => handlePageChange(page)}
-                      className={`p-2 border border-gray-200 rounded-lg transition-colors ${
+                      disabled={isRefreshing}
+                      className={`p-2 border border-gray-200 rounded-lg transition-colors disabled:cursor-not-allowed ${
                         currentPage === page
                           ? "bg-[#0097BB] text-white"
                           : "hover:bg-gray-100"
@@ -604,7 +683,7 @@ export function LogbookTable() {
                   ))}
                   <button
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === meta.last_page}
+                    disabled={currentPage === meta.last_page || isRefreshing}
                     className="p-2 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     &gt;

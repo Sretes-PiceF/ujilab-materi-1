@@ -12,10 +12,11 @@ import {
 } from "lucide-react";
 import { MagangTable } from "@/components/layout/guru/MagangTable";
 import { CardStats } from "@/components/ui/CardStats";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MagangDashboardData } from "@/types/dashboard";
 import { TambahMagangModal } from "@/components/layout/guru/create/TambahMagangModal";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function MagangPage() {
   useAuth();
@@ -26,17 +27,21 @@ export default function MagangPage() {
     selesai: 0,
     pending: 0,
   });
+
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const fetchMagangStats = async () => {
+  /** ======================
+   * FETCH STATS MAGANG
+   ====================== */
+  const fetchMagangStats = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem("access_token");
 
-      // Sesuaikan dengan route backend untuk data magang
       const API_URL =
         process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
       const response = await fetch(`${API_URL}/guru/magang`, {
         headers: {
           Accept: "application/json",
@@ -46,36 +51,59 @@ export default function MagangPage() {
         },
       });
 
-      console.log("Magang Response status:", response.status);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) return;
 
       const text = await response.text();
-      console.log("Magang Raw response:", text);
+      if (!text) return;
 
-      // Coba parse JSON hanya jika text tidak kosong
-      if (text) {
-        const result = JSON.parse(text);
-
-        if (result.success) {
-          setStatsData(result.data);
-        } else {
-          console.error("Magang API returned error:", result.message);
-        }
+      const result = JSON.parse(text);
+      if (result.success) {
+        setStatsData(result.data);
       }
-    } catch (error) {
-      console.error("Error fetching Magang stats:", error);
-      // Tetap gunakan default values (0) jika error
+    } catch {
+      // silent fail, pakai state terakhir
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  /** ======================
+   * INITIAL LOAD
+   ====================== */
   useEffect(() => {
     fetchMagangStats();
-  }, []);
+  }, [fetchMagangStats]);
+
+  /** ======================
+   * REALTIME MAGANG STATS
+   ====================== */
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("magang-stats-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "magang" },
+        (payload) => {
+          // INSERT / DELETE → pasti refresh
+          if (payload.eventType !== "UPDATE") {
+            fetchMagangStats();
+            return;
+          }
+
+          // UPDATE → hanya jika status berubah
+          if (payload.new.status !== payload.old?.status) {
+            fetchMagangStats();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchMagangStats]);
 
   const handleSuccessAdd = () => {
     fetchMagangStats();
@@ -83,7 +111,7 @@ export default function MagangPage() {
 
   return (
     <div className="p-8">
-      {/* Header Halaman */}
+      {/* HEADER */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Data Siswa Magang</h1>
         <p className="text-gray-600 mt-1">
@@ -91,7 +119,7 @@ export default function MagangPage() {
         </p>
       </div>
 
-      {/* GRID CARDS - SUDAH DIRAPIKAN */}
+      {/* STATS */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
         <CardStats
           title="Total Siswa"
@@ -99,21 +127,18 @@ export default function MagangPage() {
           description="Siswa magang terdaftar"
           icon={User}
         />
-
         <CardStats
           title="Aktif"
           value={loading ? "..." : statsData.aktif}
           description="Sedang magang"
           icon={Building2}
         />
-
         <CardStats
           title="Selesai"
           value={loading ? "..." : statsData.selesai}
           description="Magang selesai"
           icon={CheckCircle}
         />
-
         <CardStats
           title="Pending"
           value={loading ? "..." : statsData.pending}
@@ -122,19 +147,18 @@ export default function MagangPage() {
         />
       </div>
 
-      {/* Card Tabel Magang */}
+      {/* TABEL */}
       <Card className="shadow-lg rounded-xl border-0">
         <CardHeader className="py-4 px-6 border-b bg-gray-50/50 rounded-t-xl">
-          <div className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center text-xl font-semibold text-gray-900">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center text-xl font-semibold">
               <UsersRound className="h-5 w-5 mr-2 text-cyan-600" />
               Daftar Siswa Magang
             </CardTitle>
 
-            {/* TOMBOL TAMBAH SISWA */}
             <Button
               onClick={() => setIsModalOpen(true)}
-              className="bg-[#0097BB] hover:bg-[#007b9e] text-white rounded-lg shadow-md transition-colors px-4 py-2"
+              className="bg-[#0097BB] hover:bg-[#007b9e] text-white"
             >
               <Plus className="h-4 w-4 mr-2" />
               Tambah Siswa
@@ -143,10 +167,10 @@ export default function MagangPage() {
         </CardHeader>
 
         <CardContent className="p-6">
-          {/* Tabel Siswa Magang dimuat di sini */}
           <MagangTable />
         </CardContent>
       </Card>
+
       <TambahMagangModal
         open={isModalOpen}
         onOpenChange={setIsModalOpen}
