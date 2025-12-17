@@ -218,6 +218,10 @@ ec5e1d2483acedae5c51bc0d0c011d2cc6ec59aa629be37cf26b3193b03e34ff
 * Mengirim notifikasi dari server (Supabase)
 * Notifikasi interaktif (punya tombol aksi)
 
+=======================================================
+		Ada tetapi tidak dari Supabase
+=======================================================
+
 ---
 
 ## **18. Dashboard Analitik**
@@ -245,7 +249,7 @@ ec5e1d2483acedae5c51bc0d0c011d2cc6ec59aa629be37cf26b3193b03e34ff
 * Debounce input agar tidak berat
 
 =========================================
-	Ada beberapa yang belu
+	Magang(Guru),....
 =========================================
 
 ---
@@ -257,6 +261,7 @@ ec5e1d2483acedae5c51bc0d0c011d2cc6ec59aa629be37cf26b3193b03e34ff
    * Konsep sprite sheet
    * Mengurangi banyak request HTTP
    * Cara menggunakan sprite di Next.js
+		(Selesai)
 
 2. **Local Storage & Session Storage** (digabung)
 
@@ -265,19 +270,23 @@ ec5e1d2483acedae5c51bc0d0c011d2cc6ec59aa629be37cf26b3193b03e34ff
    * Cara membaca, menulis, dan menghapus data
    * Contoh: menyimpan tema, filter, preferensi user
 
+		(Besok Pengimplementasian)
+
 3. **Database Browser** (IndexedDB, SQLite via VxDB)
 
    * Apa itu IndexedDB
    * Cara menyimpan data offline
    * Konsep mini database di browser
    * Penyimpanan cache untuk PWA
+	
+		(Besok Pengimplementasian)
 
 4. **Membuat Komponen UI yang Reusable**
 
    * Button, Card, Input, Modal
    * Konsep reuse vs duplicate
    * Folder structure untuk komponen
-
+		(Selesai)
 ---
 
 # **Catatan**

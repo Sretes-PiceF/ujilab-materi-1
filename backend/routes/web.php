@@ -1,6 +1,8 @@
 <?php
 
+use App\Events\MagangUpdated;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\MagangGuruController;
 use App\Http\Controllers\MagangSiswaController;
 use App\Http\Controllers\VerifikasiController;
 use App\Http\Middleware\SiswaMiddleware;
@@ -23,3 +25,5 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/magang/download/{item}', [MagangSiswaController::class, 'generateLaporanMagangPdf'])->name('magang.download');
     });
 });
+
+Route::get('/test-broadcast/{id}', [MagangGuruController::class, 'testBroadcast']);

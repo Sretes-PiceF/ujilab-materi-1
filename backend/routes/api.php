@@ -1,9 +1,11 @@
 <?php
 
+use App\Http\Controllers\Api\BatchController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DudiGuruController;
 use App\Http\Controllers\DudiSiswaController;
+use App\Http\Controllers\ItemController;
 use App\Http\Controllers\LogbookGuruController;
 use App\Http\Controllers\LogbookSiswaController;
 use App\Http\Controllers\MagangGuruController;
@@ -12,6 +14,7 @@ use App\Http\Controllers\SiswaController;
 use App\Http\Middleware\GuruMiddleware;
 use App\Http\Middleware\SiswaMiddleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
@@ -94,4 +97,28 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/guru/siswa/list', [MagangGuruController::class, 'getSiswaList']);
         Route::delete('/guru/magang/delete/{id}', [MagangGuruController::class, 'deleteMagang']);
     });
+});
+
+
+
+Route::get('/magang/batch', [BatchController::class, 'getMagangData']);
+
+
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'redis' => Cache::has('health_check') ? 'connected' : 'disconnected',
+        'timestamp' => now(),
+    ]);
+});
+
+// Items CRUD with cache
+Route::prefix('items')->group(function () {
+    Route::get('/', [ItemController::class, 'index']);
+    Route::get('/{id}', [ItemController::class, 'show']);
+    Route::post('/', [ItemController::class, 'store']);
+    Route::put('/{id}', [ItemController::class, 'update']);
+    Route::patch('/{id}', [ItemController::class, 'update']);
+    Route::delete('/{id}', [ItemController::class, 'destroy']);
+    Route::post('/clear-cache', [ItemController::class, 'clearCache']);
 });

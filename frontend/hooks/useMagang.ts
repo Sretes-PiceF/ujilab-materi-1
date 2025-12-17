@@ -1,344 +1,268 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from "react";
+import { useState } from 'react';
+import useSWR from 'swr';
+import api from '@/lib/axios';
 
-// Types untuk Magang
-export interface Magang {
-  id: number;
-  siswa_id: number;
-  dudi_id: number;
-  guru_id: number;
-  status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
-  nilai_akhir?: number | null;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  created_at: string;
-  updated_at: string;
-  
-  siswa?: {
-    id: number;
-    user_id: number;
-    nama: string;
-    nis: string;
-    kelas: string;
-    jurusan: string;
-    telepon: string;
-    alamat: string;
-    email: string; // Email sudah di-map dari backend
-  };
-  
-  dudi?: {
-    id: number;
-    nama_perusahaan: string;
-    alamat: string;
-    telepon: string;
-    penanggung_jawab: string;
-  };
-  
-  guru?: {
-    id: number;
-    nama: string;
-    nip: string;
-  };
-}
-
-export interface MagangFormData {
-  siswa_id: number;
-  dudi_id: number;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
-  nilai_akhir?: number | null;
-}
-
-export interface Siswa {
-  id: number;
+// ============= TYPES =============
+interface Siswa {
+  id: string;
+  user_id: string;
   nama: string;
   nis: string;
   kelas: string;
   jurusan: string;
   telepon: string;
   alamat: string;
-  email: string; // Email sudah di-map dari backend
-}
-
-export interface Dudi {
-  id: number;
-  nama_perusahaan: string;
-  alamat: string;
-  telepon: string;
-  penanggung_jawab: string;
   email?: string;
 }
 
-export const useMagang = () => {
-  const [magangList, setMagangList] = useState<Magang[]>([]);
-  const [siswaList, setSiswaList] = useState<Siswa[]>([]);
-  const [dudiList, setDudiList] = useState<Dudi[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface Dudi {
+  id: string;
+  nama_perusahaan: string;
+  alamat: string;
+  telepon: string;
+  email: string;
+  status: 'aktif' | 'nonaktif';
+}
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+interface Guru {
+  id: string;
+  nama: string;
+  nip: string;
+}
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem("access_token");
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      "ngrok-skip-browser-warning": "true",
-    };
-  };
+interface Magang {
+  id: string;
+  siswa_id: string;
+  dudi_id: string;
+  guru_id: string;
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  status: 'pending' | 'diterima' | 'ditolak' | 'berlangsung' | 'selesai' | 'dibatalkan';
+  nilai_akhir?: number | null;
+  verification_token?: string;
+  created_at: string;
+  updated_at: string;
+  siswa?: Siswa;
+  dudi?: Dudi;
+  guru?: Guru;
+}
 
-  // GET ALL MAGANG LIST
-  const fetchMagang = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+interface MagangStats {
+  total_siswa: number;
+  aktif: number;
+  selesai: number;
+  pending: number;
+}
 
-      const response = await fetch(`${API_URL}/guru/magang/list`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
+interface BatchMagangData {
+  stats: MagangStats;
+  magang_list: Magang[];
+  siswa_list: Siswa[];
+  timestamp: string;
+}
 
-      if (response.status === 401) {
-        localStorage.removeItem("access_token");
-        window.location.href = "/";
-        return;
-      }
+interface CreateMagangData {
+  siswa_id: string;
+  dudi_id: string;
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  status: string;
+  nilai_akhir?: number;
+}
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+interface UpdateMagangData extends CreateMagangData {
+  catatan?: string;
+}
 
-      const result = await response.json();
-      
-      if (result.success) {
-        // Debug: Log untuk melihat data yang diterima
-        console.log('📦 Data Magang dari API:', result.data);
-        if (result.data.length > 0) {
-          console.log('📧 Sample Email:', result.data[0].siswa?.email);
-        }
-        
-        setMagangList(result.data);
-      } else {
-        throw new Error(result.message || 'Failed to fetch magang data');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-      console.error('Error fetching magang:', err);
-    } finally {
-      setLoading(false);
+interface ApiResponse<T> {
+  success: boolean;
+  message?: string;
+  data?: T;
+  errors?: Record<string, string[]>;
+  cached?: boolean;
+  cache_ttl?: number;
+}
+
+// ============= FETCHER =============
+const fetcher = (url: string) => api.get(url).then(res => res.data);
+
+// ============= BATCH HOOK (MAIN HOOK) =============
+/**
+ * Hook utama untuk fetch SEMUA data magang dalam 1 request
+ * Menggantikan 3 requests (stats + list + siswa) jadi 1
+ */
+export function useMagangBatch() {
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<BatchMagangData>>(
+    '/magang/batch',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 5000, // Cache 5 detik
+      revalidateOnMount: true,
     }
-  };
-
-  // GET MAGANG BY ID
-  const fetchMagangById = async (id: number): Promise<Magang | null> => {
-    try {
-      const response = await fetch(`${API_URL}/guru/magang/${id}`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        return result.data;
-      } else {
-        throw new Error(result.message || 'Failed to fetch magang data');
-      }
-    } catch (err) {
-      console.error('Error fetching magang by ID:', err);
-      return null;
-    }
-  };
-
-  // CREATE MAGANG
-  const createMagang = async (formData: MagangFormData): Promise<{ success: boolean; message: string }> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(`${API_URL}/guru/magang/create`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(formData),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        await fetchMagang(); // Refresh list
-        return { success: true, message: result.message || 'Magang berhasil dibuat' };
-      } else {
-        throw new Error(result.message || 'Failed to create magang');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan';
-      setError(errorMessage);
-      console.error('Error creating magang:', err);
-      return { success: false, message: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // UPDATE MAGANG
-  const updateMagang = async (id: number, formData: MagangFormData): Promise<{ success: boolean; message: string }> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(`${API_URL}/guru/magang/update/${id}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(formData),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        await fetchMagang(); // Refresh list
-        return { success: true, message: result.message || 'Magang berhasil diupdate' };
-      } else {
-        throw new Error(result.message || 'Failed to update magang');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan';
-      setError(errorMessage);
-      console.error('Error updating magang:', err);
-      return { success: false, message: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // DELETE MAGANG
-  const deleteMagang = async (id: number): Promise<{ success: boolean; message: string }> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(`${API_URL}/guru/magang/delete/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        await fetchMagang(); // Refresh list
-        return { success: true, message: result.message || 'Magang berhasil dihapus' };
-      } else {
-        throw new Error(result.message || 'Failed to delete magang');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan';
-      setError(errorMessage);
-      console.error('Error deleting magang:', err);
-      return { success: false, message: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // GET SISWA LIST (untuk dropdown)
-  const fetchSiswaList = async (): Promise<Siswa[]> => {
-    try {
-      const response = await fetch(`${API_URL}/guru/siswa/list`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Debug: Log untuk melihat data siswa
-        console.log('📦 Data Siswa dari API:', result.data);
-        if (result.data.length > 0) {
-          console.log('📧 Sample Siswa Email:', result.data[0].email);
-        }
-        
-        setSiswaList(result.data);
-        return result.data;
-      } else {
-        throw new Error(result.message || 'Failed to fetch siswa data');
-      }
-    } catch (err) {
-      console.error('Error fetching siswa list:', err);
-      return [];
-    }
-  };
-
-  // GET DUDI AKTIF LIST (untuk dropdown)
-  const fetchDudiAktif = async (): Promise<Dudi[]> => {
-    try {
-      const response = await fetch(`${API_URL}/guru/dudi/list`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        setDudiList(result.data);
-        return result.data;
-      } else {
-        throw new Error(result.message || 'Failed to fetch DUDI data');
-      }
-    } catch (err) {
-      console.error('Error fetching DUDI list:', err);
-      return [];
-    }
-  };
-
-  // Refresh semua data
-  const refreshAll = async () => {
-    await Promise.all([
-      fetchMagang(),
-      fetchSiswaList(),
-      fetchDudiAktif()
-    ]);
-  };
-
-  useEffect(() => {
-    fetchMagang();
-    fetchSiswaList();
-    fetchDudiAktif();
-  }, []);
+  );
 
   return {
-    // State
-    magangList,
-    siswaList,
-    dudiList,
-    loading,
+    // Stats
+    stats: data?.data?.stats || {
+      total_siswa: 0,
+      aktif: 0,
+      selesai: 0,
+      pending: 0,
+    },
+    
+    // Magang List
+    magang: data?.data?.magang_list || [],
+    
+    // Siswa List
+    siswa: data?.data?.siswa_list || [],
+    
+    // Meta
+    isLoading,
     error,
+    isCached: data?.cached || false,
+    timestamp: data?.data?.timestamp || null,
     
     // Actions
-    fetchMagang,
-    fetchMagangById,
+    refresh: mutate,
+  };
+}
+
+// ============= INDIVIDUAL HOOKS (Fallback) =============
+/**
+ * Hook untuk fetch magang list saja
+ * Gunakan ini kalau tidak butuh stats & siswa
+ */
+export function useMagang() {
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<Magang[]>>(
+    '/guru/magang/list',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 5000,
+    }
+  );
+
+  return {
+    magang: data?.data || [],
+    isLoading,
+    error,
+    refresh: mutate,
+  };
+}
+
+/**
+ * Hook untuk fetch stats saja
+ */
+export function useMagangStats() {
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<MagangStats>>(
+    '/guru/magang',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 10000,
+    }
+  );
+
+  return {
+    stats: data?.data || {
+      total_siswa: 0,
+      aktif: 0,
+      selesai: 0,
+      pending: 0,
+    },
+    isLoading,
+    error,
+    refresh: mutate,
+  };
+}
+
+/**
+ * Hook untuk fetch siswa list saja
+ */
+export function useSiswaList() {
+  const { data, error, isLoading } = useSWR<ApiResponse<Siswa[]>>(
+    '/guru/siswa/list',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 30000,
+    }
+  );
+
+  return {
+    siswa: data?.data || [],
+    isLoading,
+    error,
+  };
+}
+
+// ============= MUTATIONS HOOK =============
+/**
+ * Hook untuk CRUD operations
+ */
+export function useMagangMutations() {
+  const [loading, setLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+
+  const createMagang = async (data: CreateMagangData): Promise<ApiResponse<Magang>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const response = await api.post<ApiResponse<Magang>>('/guru/magang/create', data);
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 422) {
+        setValidationErrors(error.response.data.errors || {});
+        throw new Error(error.response.data.message || 'Validasi gagal');
+      }
+      throw new Error(error.response?.data?.message || 'Gagal membuat data magang');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateMagang = async (id: string, data: UpdateMagangData): Promise<ApiResponse<Magang>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const response = await api.patch<ApiResponse<Magang>>(`/guru/magang/update/${id}`, data);
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 422) {
+        setValidationErrors(error.response.data.errors || {});
+        throw new Error(error.response.data.message || 'Validasi gagal');
+      }
+      throw new Error(error.response?.data?.message || 'Gagal mengupdate data magang');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteMagang = async (id: string): Promise<ApiResponse<null>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const response = await api.delete<ApiResponse<null>>(`/guru/magang/delete/${id}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Gagal menghapus data magang');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return {
     createMagang,
     updateMagang,
     deleteMagang,
-    fetchSiswaList,
-    fetchDudiAktif,
-    refreshAll,
-    
-    // Utilities
-    clearError: () => setError(null),
+    loading,
+    validationErrors,
+    clearErrors: () => setValidationErrors({}),
   };
-};
+}

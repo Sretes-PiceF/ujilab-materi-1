@@ -12,7 +12,7 @@ export function middleware(req: NextRequest) {
   console.log("TOKEN      :", token ? "(ADA)" : "(TIDAK ADA)");
   console.log("USER RAW   :", userDataRaw ? userDataRaw.substring(0, 50) + "..." : "(null)");
 
-  // 🔥 FIX: DECODE USER DATA
+  //  FIX: DECODE USER DATA
   let user = null;
   try {
     if (userDataRaw) {
@@ -20,7 +20,7 @@ export function middleware(req: NextRequest) {
       user = JSON.parse(decoded);
     }
   } catch (error) {
-    console.log("❌ ERROR: JSON PARSE USER", error);
+    console.log("ERROR: JSON PARSE USER", error);
     user = null;
   }
 
@@ -31,18 +31,18 @@ export function middleware(req: NextRequest) {
   const isAuthRoute = pathname.startsWith("/siswa") || pathname.startsWith("/guru");
   const isLoginPage = pathname === "/";
 
-  // 1️⃣ Proteksi halaman siswa & guru
+  //  Proteksi halaman siswa & guru
   if (isAuthRoute) {
-    console.log("🔐 AUTH ROUTE TERDETEKSI:", pathname);
+    console.log(" AUTH ROUTE TERDETEKSI:", pathname);
 
     if (!token || !user) {
-      console.log("❌ BLOKIR — token/user tidak ada, redirect ke /");
+      console.log(" BLOKIR — token/user tidak ada, redirect ke /");
       return NextResponse.redirect(new URL("/", req.url));
     }
 
     // Role check untuk siswa
     if (pathname.startsWith("/siswa") && user.role !== "siswa") {
-      console.log("❌ ROLE SALAH — mau ke siswa tapi role:", user.role);
+      console.log(" ROLE SALAH — mau ke siswa tapi role:", user.role);
       return NextResponse.redirect(
         new URL(user.role === "guru" ? "/guru/dashboard" : "/", req.url)
       );
@@ -50,18 +50,18 @@ export function middleware(req: NextRequest) {
 
     // Role check untuk guru
     if (pathname.startsWith("/guru") && user.role !== "guru") {
-      console.log("❌ ROLE SALAH — mau ke guru tapi role:", user.role);
+      console.log(" ROLE SALAH — mau ke guru tapi role:", user.role);
       return NextResponse.redirect(
         new URL(user.role === "siswa" ? "/siswa/dashboard" : "/", req.url)
       );
     }
 
-    console.log("✅ ROLE VALID — akses diizinkan.\n");
+    console.log(" ROLE VALID — akses diizinkan.\n");
   }
 
-  // 2️⃣ Redirect dari halaman login jika sudah login
+  // Redirect dari halaman login jika sudah login
   if (isLoginPage && token && user?.role) {
-    console.log("➡️ LOGIN PAGE — user sudah login, redirect berdasarkan role.");
+    console.log(" LOGIN PAGE — user sudah login, redirect berdasarkan role.");
 
     if (user.role === "siswa") {
       return NextResponse.redirect(new URL("/siswa/dashboard", req.url));

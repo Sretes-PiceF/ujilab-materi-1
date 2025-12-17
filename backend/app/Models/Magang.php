@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class Magang extends Model
 {
@@ -61,5 +62,29 @@ class Magang extends Model
     public function logbooks()
     {
         return $this->hasMany(Logbook::class);
+    }
+
+    // ✅ BOOT METHOD - Auto broadcast events
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Broadcast saat created
+        static::created(function ($magang) {
+            Log::info('Magang Created Event', ['id' => $magang->id]);
+            broadcast(new \App\Events\MagangCreated($magang))->toOthers();
+        });
+
+        // Broadcast saat updated
+        static::updated(function ($magang) {
+            Log::info('Magang Updated Event', ['id' => $magang->id]);
+            broadcast(new \App\Events\MagangUpdated($magang))->toOthers();
+        });
+
+        // Broadcast saat deleted
+        static::deleted(function ($magang) {
+            Log::info('Magang Deleted Event', ['id' => $magang->id]);
+            broadcast(new \App\Events\MagangDeleted($magang->id))->toOthers();
+        });
     }
 }

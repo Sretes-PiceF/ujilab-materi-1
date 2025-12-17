@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   images: {
     // Untuk development, disable optimization
-    unoptimized: true, // GANTI INI dari conditional ke true
+    unoptimized: process.env.NODE_ENV == 'development',
     
     remotePatterns: [
       {
@@ -38,6 +38,57 @@ const nextConfig: NextConfig = {
     // Optional: tambahkan konfigurasi lain
     dangerouslyAllowSVG: true,
     contentDispositionType: 'attachment',
+
+    formats: ['image/avif', 'image/webp'],
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+  },
+  
+  compress: true,
+
+  swcMinify: true,
+
+  webpack: (config, { dev, isServer }) => {
+    if (!dev && !isServer) {
+      config.optimization = {
+        ...config.optimization,
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            
+            // Vendor chunk (node_modules)
+            vendor: {
+              name: 'vendor',
+              chunks: 'all',
+              test: /node_modules/,
+              priority: 20,
+            },
+            
+            // Common chunk (shared code)
+            common: {
+              name: 'common',
+              minChunks: 2,
+              chunks: 'all',
+              priority: 10,
+              reuseExistingChunk: true,
+              enforce: true,
+            },
+            
+            // UI components chunk
+            ui: {
+              name: 'ui',
+              test: /[\\/]components[\\/]ui[\\/]/,
+              chunks: 'all',
+              priority: 30,
+            },
+          },
+        },
+      };
+    }
+    
+    return config;
   },
   
   // Tambahkan untuk debugging
@@ -47,9 +98,16 @@ const nextConfig: NextConfig = {
     },
   },
   
-  // Experimental features untuk image
   experimental: {
-    optimizeCss: false,
+    // ✅ Optimize package imports
+    optimizePackageImports: [
+      'lucide-react',
+      '@/components/ui',
+      '@/hooks',
+    ],
+    
+    // ✅ Enable turbopack (faster builds)
+    // turbo: {},
   },
 };
 
