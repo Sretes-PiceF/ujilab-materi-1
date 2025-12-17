@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    console.log('🔄 Proxy fetching image:', imageUrl);
+    console.log('Proxy fetching image:', imageUrl);
 
     // Fetch image dengan header ngrok bypass
     const response = await fetch(imageUrl, {
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      console.error('❌ Fetch failed:', response.status, response.statusText);
+      console.error('Fetch failed:', response.status, response.statusText);
       return NextResponse.json(
         { error: `Failed to fetch image: ${response.statusText}` },
         { status: response.status }
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const imageBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type') || 'image/jpeg';
 
-    console.log('✅ Image fetched:', {
+    console.log('Image fetched:', {
       size: imageBuffer.byteLength,
       contentType,
     });
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('❌ Proxy error:', error);
+    console.error('Proxy error:', error);
     return NextResponse.json(
       { 
         error: 'Failed to proxy image',

@@ -18,7 +18,7 @@ export function TopbarGuru() {
     try {
       const token = localStorage.getItem("access_token");
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/me`,
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost/api"}/me`,
         {
           headers: {
             Authorization: `Bearer ${token}`,

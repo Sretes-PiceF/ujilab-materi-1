@@ -11,11 +11,7 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__ . '/../routes/api.php',
         commands: __DIR__ . '/../routes/console.php',
         health: '/up',
-        then: function () {
-            Route::middleware('api')
-                ->prefix('api') // Optional: /api/realtime/webhook
-                ->group(base_path('routes/realtime.php'));
-        }
+        channels: __DIR__ . '/../route/channels.php',
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->api(prepend: [
