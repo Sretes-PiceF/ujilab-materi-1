@@ -1,183 +1,112 @@
 "use client";
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardStats } from "@/components/ui/CardStats";
-import { LogbookTable } from "@/components/layout/guru/LogbookTable";
+import LogbookTable from "@/components/layout/guru/LogbookTable";
 import { ThumbsUp, ThumbsDown, BookOpen, Clock } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabaseClient";
-
-// Interface untuk data stats logbook
-interface LogbookStatsData {
-  total_logbook: number;
-  belum_diverifikasi: number;
-  disetujui: number;
-  ditolak: number;
-}
+import { useLogbookBatch, LogbookEntry } from "@/hooks/useLogbook";
 
 export default function LogBookPage() {
   useAuth();
 
-  const [statsData, setStatsData] = useState<LogbookStatsData>({
-    total_logbook: 0,
-    belum_diverifikasi: 0,
-    disetujui: 0,
-    ditolak: 0,
-  });
-  const [loading, setLoading] = useState(true);
+  // 🎯 Batch hook - dapat semua data SEKALI SAJA
+  const { stats, logbook, isLoading } = useLogbookBatch();
 
-  const fetchLogbookStats = useCallback(async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem("access_token");
+  const [optimisticLogbook, setOptimisticLogbook] = useState<LogbookEntry[]>([]);
+  const [optimisticStats, setOptimisticStats] = useState<any>(null);
 
-      // Sesuaikan dengan route backend untuk data logbook stats
-      const API_URL =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const response = await fetch(`${API_URL}/guru/logbook`, {
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "ngrok-skip-browser-warning": "true",
-        },
-      });
-
-      console.log("Logbook Stats Response status:", response.status);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const text = await response.text();
-      console.log("Logbook Stats Raw response:", text);
-
-      // Coba parse JSON hanya jika text tidak kosong
-      if (text) {
-        const result = JSON.parse(text);
-
-        if (result.success) {
-          setStatsData(result.data);
-        } else {
-          console.error("Logbook Stats API returned error:", result.message);
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching Logbook stats:", error);
-      // Tetap gunakan default values (0) jika error
-    } finally {
-      setLoading(false);
+  // ✅ INISIALISASI DATA: Ambil dari server sekali saat load
+  useEffect(() => {
+    // hanya set sekali saat pertama kali data ada
+    if (optimisticLogbook.length === 0 && logbook?.length) {
+      setOptimisticLogbook(logbook);
     }
+
+    if (!optimisticStats && stats) {
+      setOptimisticStats(stats);
+    }
+  }, [logbook, stats]);
+
+  // ✅ CALLBACK UNTUK UPDATE DATA DARI TABLE (REALTIME)
+  const handleDataUpdated = useCallback((updatedLogbook: LogbookEntry[]) => {
+    // Update data logbook
+    setOptimisticLogbook(updatedLogbook);
+
+    // Update stats berdasarkan data terbaru
+    const newStats = {
+      total_logbook: updatedLogbook.length,
+      belum_diverifikasi: updatedLogbook.filter(
+        (log) => log.status_verifikasi === "pending"
+      ).length,
+      disetujui: updatedLogbook.filter((log) => log.status_verifikasi === "disetujui")
+        .length,
+      ditolak: updatedLogbook.filter((log) => log.status_verifikasi === "ditolak").length,
+    };
+    setOptimisticStats(newStats);
   }, []);
 
-  useEffect(() => {
-    fetchLogbookStats();
-  }, [fetchLogbookStats]);
-
-  // Real-time subscription untuk update data Logbook
-  useEffect(() => {
-    if (!supabase) return;
-
-    const channel = supabase
-      .channel("logbook-stats-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "logbook",
-        },
-        async () => {
-          console.log("New logbook added, refreshing stats...");
-          await fetchLogbookStats();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "logbook",
-        },
-        async (payload) => {
-          // Hanya refresh jika status verifikasi berubah
-          if (
-            payload.new.status_verifikasi !== payload.old?.status_verifikasi
-          ) {
-            console.log("Logbook status changed, refreshing stats...");
-            await fetchLogbookStats();
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "logbook",
-        },
-        async () => {
-          console.log("Logbook deleted, refreshing stats...");
-          await fetchLogbookStats();
-        }
-      )
-      .subscribe((status) => {
-        console.log("Supabase Logbook stats subscription status:", status);
-      });
-
-    return () => {
-      if (supabase) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, [fetchLogbookStats]);
+  // ✅ COMPUTED STATS: Gunakan optimisticStats jika ada
+  const displayStats = useMemo(() => {
+    return optimisticStats || stats;
+  }, [optimisticStats, stats]);
 
   return (
     <div className="p-8">
-      {/* 1. HEADER HALAMAN */}
+      {/* HEADER */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">
-          Manajemen Logbook Magang
-        </h1>
+        <h1 className="text-3xl font-bold text-gray-800">Manajemen Logbook Magang</h1>
         <p className="text-gray-600 mt-1">
-          Kelola dan verifikasi laporan harian kegiatan siswa magang{" "}
-          <span className="font-semibold">SIMNAS</span>
+          Kelola dan verifikasi laporan harian kegiatan siswa magang
         </p>
       </div>
 
-      {/* 2. GRID CARDS STATS */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-10">
+      {/* STATS */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
         <CardStats
           title="Total Logbook"
-          value={loading ? "..." : statsData.total_logbook}
+          value={isLoading ? "..." : displayStats?.total_logbook || 0}
           description="Keseluruhan catatan harian"
           icon={BookOpen}
         />
-
         <CardStats
           title="Belum Diverifikasi"
-          value={loading ? "..." : statsData.belum_diverifikasi}
+          value={isLoading ? "..." : displayStats?.belum_diverifikasi || 0}
           description="Menunggu verifikasi"
           icon={Clock}
         />
-
         <CardStats
           title="Disetujui"
-          value={loading ? "..." : statsData.disetujui}
+          value={isLoading ? "..." : displayStats?.disetujui || 0}
           description="Telah terverifikasi"
           icon={ThumbsUp}
         />
-
         <CardStats
           title="Ditolak"
-          value={loading ? "..." : statsData.ditolak}
+          value={isLoading ? "..." : displayStats?.ditolak || 0}
           description="Perlu perbaikan"
           icon={ThumbsDown}
         />
       </div>
 
-      {/* 3. KOMPONEN TABEL LOGBOOK */}
-      <LogbookTable />
+      {/* TABEL */}
+      <Card className="shadow-lg rounded-xl border-0">
+        <CardHeader className="py-4 px-6 border-b bg-gray-50/50 rounded-t-xl">
+          <CardTitle className="flex items-center text-xl font-semibold">
+            <BookOpen className="h-5 w-5 mr-2 text-cyan-600" />
+            Daftar Logbook Harian
+          </CardTitle>
+        </CardHeader>
+
+        <CardContent className="p-6">
+          <LogbookTable
+            logbookData={optimisticLogbook}
+            // Kirim callback untuk update data ke parent (page)
+            onDataUpdated={handleDataUpdated}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

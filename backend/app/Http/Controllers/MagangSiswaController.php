@@ -24,11 +24,21 @@ class MagangSiswaController extends Controller
                 ], 404);
             }
 
-            // Get data magang siswa yang aktif/selesai
-            $magang = Magang::with(['dudi', 'guru', 'siswa'])
+            // Ambil SEMUA data magang siswa
+            $magangRecords = Magang::with(['dudi', 'guru', 'siswa'])
                 ->where('siswa_id', $siswa->id)
-                ->whereIn('status', ['diterima', 'berlangsung', 'selesai'])
-                ->first();
+                ->get();
+
+            // Cari magang aktif (diterima/berlangsung)
+            $magangAktif = $magangRecords->firstWhere(function ($record) {
+                return in_array($record->status, ['diterima', 'berlangsung']);
+            });
+
+            // Cari magang selesai
+            $magangSelesai = $magangRecords->firstWhere('status', 'selesai');
+
+            // Prioritaskan magang aktif
+            $magang = $magangAktif ?: $magangSelesai;
 
             if (!$magang) {
                 return response()->json([

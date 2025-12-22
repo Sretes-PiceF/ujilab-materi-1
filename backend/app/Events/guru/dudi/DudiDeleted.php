@@ -1,39 +1,42 @@
 <?php
-// app/Events/MagangDeleted.php
 
-namespace App\Events;
+namespace App\Events\guru\dudi;
 
+use App\Models\Dudi;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class MagangDeleted implements ShouldBroadcast
+class DudiDeleted implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public $magangId;
+    public $dudiId;
+    public $dudiName;
 
-    public function __construct(string $magangId)
+    public function __construct(Dudi $dudi)
     {
-        $this->magangId = $magangId;
+        $this->dudiId = $dudi->id;
+        $this->dudiName = $dudi->nama_perusahaan;
     }
 
     public function broadcastOn(): Channel
     {
-        return new Channel('magang');
+        return new Channel('dudi'); // SAMA!
     }
 
     public function broadcastAs(): string
     {
-        return 'magang.deleted';
+        return 'dudi.deleted';
     }
 
     public function broadcastWith(): array
     {
         return [
-            'id' => $this->magangId,
+            'id' => $this->dudiId,
+            'nama_perusahaan' => $this->dudiName,
             'timestamp' => now()->toIso8601String(),
         ];
     }

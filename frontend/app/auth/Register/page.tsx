@@ -1,4 +1,3 @@
-// app/register/page.tsx
 "use client";
 import {
   User,
@@ -13,7 +12,7 @@ import {
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Notification from "@/components/ui/Notification/Notification"; // Sesuaikan path
+import Notification from "@/components/ui/Notification/Notification";
 import ReCAPTCHA from "react-google-recaptcha";
 
 export default function RegisterPage() {
@@ -78,7 +77,7 @@ export default function RegisterPage() {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/api/register/siswa", {
+      const response = await fetch("http://localhost/api/register/siswa", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -100,6 +99,12 @@ export default function RegisterPage() {
           message: "Akun berhasil dibuat! Silakan login.",
           type: "success",
         });
+
+        // Reset reCAPTCHA
+        setRecaptchaToken("");
+        if (recaptchaRef.current) {
+          recaptchaRef.current.reset();
+        }
 
         // Redirect ke login setelah 3 detik
         setTimeout(() => {
@@ -143,15 +148,17 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-200 to-white flex items-center justify-center p-4">
-      {/* Notification */}
+    <div className="min-h-screen bg-gradient-to-br from-blue-200 to-white flex items-center justify-center p-4 relative">
+      {/* Notification - FIXED POSITION */}
       {notification.show && (
-        <Notification
-          message={notification.message}
-          type={notification.type}
-          duration={notification.type === "success" ? 5000 : 6000}
-          onClose={closeNotification}
-        />
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-right-8 fade-in duration-300">
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            duration={notification.type === "success" ? 5000 : 6000}
+            onClose={closeNotification}
+          />
+        </div>
       )}
 
       <div className="w-full max-w-md">

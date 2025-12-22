@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class Dudi extends Model
 {
@@ -59,5 +60,29 @@ class Dudi extends Model
     public function scopeNonaktif($query)
     {
         return $query->where('status', self::STATUS_NONAKTIF);
+    }
+
+    // ✅ BOOT METHOD - Auto broadcast events
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Broadcast saat created
+        static::created(function ($dudi) {
+            Log::info('Dudi Created Event', ['id' => $dudi->id]);
+            broadcast(new \App\Events\dudi\DudiCreated($dudi))->toOthers();
+        });
+
+        // Broadcast saat updated
+        static::updated(function ($dudi) {
+            Log::info('Dudi Updated Event', ['id' => $dudi->id]);
+            broadcast(new \App\Events\dudi\DudiUpdated($dudi))->toOthers();
+        });
+
+        // Broadcast saat deleted
+        static::deleted(function ($dudi) {
+            Log::info('Dudi Deleted Event', ['id' => $dudi->id]);
+            broadcast(new \App\Events\dudi\DudiDeleted($dudi->id))->toOthers();
+        });
     }
 }

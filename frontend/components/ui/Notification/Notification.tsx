@@ -1,4 +1,4 @@
-// components/Notification.tsx
+"use client";
 import { CheckCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -20,7 +20,7 @@ export default function Notification({
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsVisible(false);
-      setTimeout(onClose, 300); // Wait for animation to finish
+      setTimeout(onClose, 300);
     }, duration);
 
     return () => clearTimeout(timer);
@@ -35,21 +35,18 @@ export default function Notification({
     type === "success"
       ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-400"
       : "bg-gradient-to-r from-red-50 to-red-100 border-red-400";
-
   const textColor = type === "success" ? "text-green-800" : "text-red-800";
-
   const iconColor = type === "success" ? "text-green-600" : "text-red-600";
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 max-w-sm w-full 
-      ${bgColor} border-2 rounded-lg p-4 shadow-lg transition-all duration-300
-      ${
+      className={`relative min-w-[320px] max-w-sm ${bgColor} border-2 rounded-lg p-4 shadow-lg 
+      transition-all duration-300 ${
         isVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"
       }`}
     >
       <div className="flex items-start gap-3">
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 mt-0.5">
           {type === "success" ? (
             <CheckCircle className={`h-5 w-5 ${iconColor}`} />
           ) : (
@@ -62,23 +59,24 @@ export default function Notification({
           <h3 className={`text-sm font-semibold ${textColor} mb-1`}>
             {type === "success" ? "Berhasil!" : "Error!"}
           </h3>
-          <p className={`text-xs ${textColor}`}>{message}</p>
+          <p className={`text-sm ${textColor}`}>{message}</p>
         </div>
         <button
           onClick={handleClose}
           className={`flex-shrink-0 ${iconColor} hover:opacity-80 rounded-full p-1 transition-all`}
           type="button"
+          aria-label="Close notification"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
+
       {/* Progress bar */}
       <div className="absolute bottom-0 left-0 h-1 w-full bg-gray-200 rounded-b-lg overflow-hidden">
         <div
           className={`h-full ${
             type === "success" ? "bg-green-500" : "bg-red-500"
-          } 
-            animate-shrink`}
+          } animate-shrink`}
           style={{ animationDuration: `${duration}ms` }}
         ></div>
       </div>

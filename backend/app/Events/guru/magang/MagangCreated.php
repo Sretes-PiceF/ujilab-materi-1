@@ -1,7 +1,7 @@
 <?php
 // app/Events/MagangCreated.php
 
-namespace App\Events;
+namespace App\Events\guru\magang;
 
 use App\Models\Magang;
 use Illuminate\Broadcasting\Channel;

@@ -9,12 +9,27 @@ import {
   MapPin,
   Download,
   QrCode,
+  Clock,
+  AlertCircle,
+  XCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 
-// Interface untuk data magang
+// Interface untuk data siswa dan magang
+interface SiswaData {
+  id: string;
+  nama: string;
+  nis: string;
+  kelas: string;
+  jurusan: string;
+  email: string;
+  telepon: string;
+  alamat: string;
+}
+
 interface MagangData {
+  id: string;
   name: string;
   nis: string;
   class: string;
@@ -25,13 +40,67 @@ interface MagangData {
   status: string;
   finalGrade: string | null;
   verification_token: string | null;
+  tanggal_mulai?: string;
+  tanggal_selesai?: string;
 }
+
+// Loading Skeleton Component untuk Card
+const CardSkeleton = () => {
+  return (
+    <div className="bg-white shadow-sm rounded-xl border border-gray-100 p-4 md:p-6 mb-6">
+      <div className="flex items-center gap-2 mb-4 md:mb-6">
+        <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
+        <div className="h-6 w-40 bg-gray-200 rounded animate-pulse"></div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        {/* Kolom Kiri - Skeleton */}
+        <div className="space-y-3 md:space-y-4">
+          {[...Array(5)].map((_, index) => (
+            <div key={index} className="flex items-start gap-3">
+              <div className="h-4 w-4 bg-gray-200 rounded mt-1 animate-pulse"></div>
+              <div className="flex-1 min-w-0">
+                <div className="h-3 w-20 bg-gray-200 rounded mb-2 animate-pulse"></div>
+                <div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Kolom Kanan - Skeleton */}
+        <div className="space-y-3 md:space-y-4">
+          {[...Array(5)].map((_, index) => (
+            <div key={index} className="flex items-start gap-3">
+              <div className="h-4 w-4 bg-gray-200 rounded mt-1 animate-pulse"></div>
+              <div className="flex-1 min-w-0">
+                <div className="h-3 w-20 bg-gray-200 rounded mb-2 animate-pulse"></div>
+                <div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Status Message Skeleton */}
+      <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex items-start gap-3">
+          <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
+          <div className="flex-1">
+            <div className="h-4 w-40 bg-gray-200 rounded mb-2 animate-pulse"></div>
+            <div className="h-3 w-full bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-3 w-2/3 bg-gray-200 rounded mt-1 animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function MagangPage() {
   useAuth();
+  const [siswaData, setSiswaData] = useState<SiswaData | null>(null);
   const [magangData, setMagangData] = useState<MagangData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -41,20 +110,22 @@ export default function MagangPage() {
     { ssr: false }
   );
 
-  // Fetch data magang
-  const fetchMagangData = async () => {
+  // Fetch data siswa dan magang
+  const fetchData = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem("access_token");
 
       if (!token) {
-        throw new Error("Token tidak ditemukan. Silakan login ulang.");
+        console.log("Token tidak ditemukan");
+        setSiswaData(null);
+        setMagangData(null);
+        return;
       }
 
-      const response = await fetch(
-        `${
-          process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
-        }/siswa/magang`,
+      // 1. Fetch data siswa terlebih dahulu
+      const siswaResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/siswa/profile`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -64,59 +135,88 @@ export default function MagangPage() {
         }
       );
 
-      if (response.ok) {
-        const result = await response.json();
-
-        if (result.success && result.data) {
-          // Format data
-          const formattedData = {
-            ...result.data,
-            verification_token:
-              result.data.verification_token ||
-              result.data.verification ||
-              null,
-          };
-
-          setMagangData(formattedData);
-          setError(null);
-        } else {
-          setMagangData(null);
-          setError(result.message || "Data magang tidak ditemukan");
+      if (siswaResponse.ok) {
+        const siswaResult = await siswaResponse.json();
+        if (siswaResult.success && siswaResult.data) {
+          setSiswaData(siswaResult.data);
         }
-      } else {
-        throw new Error("Gagal mengambil data magang");
       }
-    } catch (err: any) {
-      console.error("Error fetching magang data:", err);
-      setError("Gagal memuat data magang");
+
+      // 2. Fetch data magang (opsional)
+      try {
+        const magangResponse = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/siswa/magang`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "ngrok-skip-browser-warning": "true",
+            },
+          }
+        );
+
+        if (magangResponse.ok) {
+          const magangResult = await magangResponse.json();
+          if (magangResult.success && magangResult.data) {
+            // Format data magang
+            const formattedData: MagangData = {
+              ...magangResult.data,
+              verification_token:
+                magangResult.data.verification_token ||
+                magangResult.data.verification ||
+                null,
+              name: magangResult.data.nama_siswa || magangResult.data.name || siswaData?.nama || "",
+              nis: magangResult.data.nis || siswaData?.nis || "",
+              class: magangResult.data.kelas || siswaData?.kelas || "",
+              major: magangResult.data.jurusan || siswaData?.jurusan || "",
+              company: magangResult.data.nama_perusahaan || magangResult.data.company || "",
+              address: magangResult.data.alamat_perusahaan || magangResult.data.address || "",
+              period: magangResult.data.period || 
+                (magangResult.data.tanggal_mulai && magangResult.data.tanggal_selesai 
+                  ? `${new Date(magangResult.data.tanggal_mulai).toLocaleDateString('id-ID')} - ${new Date(magangResult.data.tanggal_selesai).toLocaleDateString('id-ID')}`
+                  : ""),
+              status: magangResult.data.status || "pending",
+              finalGrade: magangResult.data.nilai_akhir || null,
+            };
+            setMagangData(formattedData);
+          } else {
+            // Tidak ada data magang - status default "pending"
+            setMagangData(null);
+          }
+        }
+      } catch (magangError) {
+        console.log("Tidak ada data magang:", magangError);
+        setMagangData(null);
+      }
+
+    } catch (error) {
+      console.log("Error fetching data:", error);
+      setSiswaData(null);
+      setMagangData(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchMagangData();
+    fetchData();
   }, []);
 
   // ✅ Fungsi Download PDF
   const handleDownloadReport = async () => {
     if (!magangData?.verification_token) {
-      alert("Token verifikasi tidak tersedia");
+      alert("Laporan belum tersedia");
       return;
     }
 
     try {
       setIsDownloading(true);
-
-      // ✅ Gunakan route public dengan token
       const downloadUrl = `${
         process.env.NEXT_PUBLIC_LARAVEL_BASE_URL || "http://localhost:8000"
       }/verifikasi/pdf/${magangData.verification_token}`;
-
-      // Buka di tab baru
       window.open(downloadUrl, "_blank");
-    } catch (err: any) {
-      console.error("Error downloading report:", err);
+    } catch (err) {
+      console.log("Error downloading report:", err);
       alert("Gagal mengunduh laporan");
     } finally {
       setIsDownloading(false);
@@ -124,11 +224,12 @@ export default function MagangPage() {
   };
 
   const hasMagang = magangData !== null;
+  const currentStatus = magangData?.status?.toLowerCase() || "pending";
 
   // ✅ Logika untuk menampilkan tombol QR & Download
   const canShowQrButton =
     hasMagang &&
-    magangData.status?.toLowerCase() === "selesai" &&
+    currentStatus === "selesai" &&
     !!magangData.verification_token;
 
   // ✅ URL verifikasi untuk QR Code
@@ -138,218 +239,246 @@ export default function MagangPage() {
       }/verifikasi/pdf/${magangData.verification_token}`
     : "";
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen bg-gray-50">
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 p-8 overflow-y-auto">
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-              <span className="ml-3 text-gray-600 mt-4">
-                Memuat data magang...
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // ✅ Format periode
+  const formatPeriod = () => {
+    if (magangData?.tanggal_mulai && magangData?.tanggal_selesai) {
+      return `${new Date(magangData.tanggal_mulai).toLocaleDateString('id-ID')} - ${new Date(magangData.tanggal_selesai).toLocaleDateString('id-ID')}`;
+    }
+    return magangData?.period || "Belum ditentukan";
+  };
 
-  if (error) {
-    return (
-      <div className="flex min-h-screen bg-gray-50">
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 p-8 overflow-y-auto">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center max-w-md mx-auto">
-              <div className="text-red-500 mb-4">
-                <svg
-                  className="w-12 h-12 mx-auto"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              <p className="text-red-700 mb-4 font-medium">{error}</p>
-              <button
-                onClick={fetchMagangData}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-              >
-                Coba Lagi
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // ✅ Get status color and icon
+  const getStatusConfig = (status: string) => {
+    const statusLower = status.toLowerCase();
+    
+    switch (statusLower) {
+      case "diterima":
+      case "berlangsung":
+      case "aktif":
+        return {
+          color: "bg-green-100 text-green-800 border-green-200",
+          icon: <CheckCircle className="h-4 w-4 text-green-600" />,
+          label: "Diterima",
+          description: "Magang Anda sudah diterima dan sedang berlangsung"
+        };
+      case "selesai":
+        return {
+          color: "bg-blue-100 text-blue-800 border-blue-200",
+          icon: <CheckCircle className="h-4 w-4 text-blue-600" />,
+          label: "Selesai",
+          description: "Magang Anda telah selesai"
+        };
+      case "pending":
+        return {
+          color: "bg-yellow-100 text-yellow-800 border-yellow-200",
+          icon: <Clock className="h-4 w-4 text-yellow-600" />,
+          label: "Pending",
+          description: "Menunggu verifikasi dan penempatan"
+        };
+      case "ditolak":
+        return {
+          color: "bg-red-100 text-red-800 border-red-200",
+          icon: <XCircle className="h-4 w-4 text-red-600" />,
+          label: "Ditolak",
+          description: "Pengajuan magang ditolak"
+        };
+      case "dibatalkan":
+        return {
+          color: "bg-gray-100 text-gray-800 border-gray-200",
+          icon: <XCircle className="h-4 w-4 text-gray-600" />,
+          label: "Dibatalkan",
+          description: "Magang dibatalkan"
+        };
+      default:
+        return {
+          color: "bg-gray-100 text-gray-800 border-gray-200",
+          icon: <AlertCircle className="h-4 w-4 text-gray-600" />,
+          label: status,
+          description: "Status magang"
+        };
+    }
+  };
+
+  const statusConfig = getStatusConfig(currentStatus);
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Page Content */}
-        <div className="flex-1 p-4 md:p-6 lg:p-8 overflow-y-auto">
-          {/* Header */}
-          <div className="mb-6 md:mb-8">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-              Status Magang Saya
-            </h1>
-            <p className="text-gray-600">
-              Lihat informasi detail tempat dan status magang Anda
-            </p>
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 lg:p-8">
+      {/* Header */}
+      <div className="mb-6 md:mb-8">
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+          {hasMagang ? "Status Magang Saya" : "Profil Siswa"}
+        </h1>
+        <p className="text-gray-600">
+          {hasMagang 
+            ? "Lihat informasi detail tempat dan status magang Anda" 
+            : "Informasi profil dan status pengajuan magang"}
+        </p>
+      </div>
+
+      {/* Main Card atau Loading Skeleton */}
+      {loading ? (
+        <CardSkeleton />
+      ) : (
+        <div className="bg-white shadow-sm rounded-xl border border-gray-100 p-4 md:p-6 mb-6">
+          <div className="flex items-center gap-2 mb-4 md:mb-6">
+            <User className="h-5 w-5 text-blue-500 flex-shrink-0" />
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900">
+              {hasMagang ? "Data Magang" : "Data Siswa"}
+            </h2>
           </div>
 
-          {hasMagang ? (
-            /* Data Magang Card */
-            <div className="bg-white shadow-sm rounded-xl p-4 md:p-6 border border-gray-100 mb-6">
-              <div className="flex items-center gap-2 mb-4 md:mb-6">
-                <User className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                <h2 className="text-lg md:text-xl font-semibold text-gray-900">
-                  Data Magang
-                </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            {/* Kolom Kiri - Data Siswa */}
+            <div className="space-y-3 md:space-y-4">
+              <div className="flex items-start gap-3">
+                <User className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">Nama Siswa</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {siswaData?.nama || magangData?.name || "-"}
+                  </p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                {/* Kolom Kiri */}
-                <div className="space-y-3 md:space-y-4">
-                  <div className="flex items-start gap-3">
-                    <User className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">Nama Siswa</p>
-                      <p className="text-sm font-semibold text-gray-900 truncate">
-                        {magangData.name}
-                      </p>
-                    </div>
-                  </div>
+              <div className="flex items-start gap-3">
+                <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">Kelas</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {siswaData?.kelas || magangData?.class || "-"}
+                  </p>
+                </div>
+              </div>
 
-                  <div className="flex items-start gap-3">
-                    <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">Kelas</p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {magangData.class}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">
-                        Nama Perusahaan
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900 truncate">
-                        {magangData.company}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <Calendar className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">
-                        Periode Magang
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {magangData.period}
-                      </p>
-                    </div>
-                  </div>
-
-                  {magangData.finalGrade && (
-                    <div className="flex items-start gap-3">
-                      <Star className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-500 mb-1">
-                          Nilai Akhir
-                        </p>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {magangData.finalGrade}
-                        </p>
-                      </div>
+              <div className="flex items-start gap-3">
+                <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">
+                    {hasMagang ? "Nama Perusahaan" : "Status Magang"}
+                  </p>
+                  {hasMagang ? (
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {magangData.company || "-"}
+                    </p>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
+                        {statusConfig.icon}
+                        <span className="ml-1">{statusConfig.label}</span>
+                      </span>
+                      <p className="text-xs text-gray-500">{statusConfig.description}</p>
                     </div>
                   )}
                 </div>
+              </div>
 
-                {/* Kolom Kanan */}
-                <div className="space-y-3 md:space-y-4">
-                  <div className="flex items-start gap-3">
-                    <User className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">NIS</p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {magangData.nis}
-                      </p>
-                    </div>
+              {hasMagang && (
+                <div className="flex items-start gap-3">
+                  <Calendar className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 mb-1">Periode Magang</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {formatPeriod()}
+                    </p>
                   </div>
+                </div>
+              )}
 
-                  <div className="flex items-start gap-3">
-                    <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">Jurusan</p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {magangData.major}
-                      </p>
-                    </div>
+              {magangData?.finalGrade && (
+                <div className="flex items-start gap-3">
+                  <Star className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 mb-1">Nilai Akhir</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {magangData.finalGrade}
+                    </p>
                   </div>
+                </div>
+              )}
+            </div>
 
-                  <div className="flex items-start gap-3">
-                    <MapPin className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">
-                        Alamat Perusahaan
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900 truncate">
-                        {magangData.address}
-                      </p>
-                    </div>
-                  </div>
+            {/* Kolom Kanan */}
+            <div className="space-y-3 md:space-y-4">
+              <div className="flex items-start gap-3">
+                <User className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">NIS</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {siswaData?.nis || magangData?.nis || "-"}
+                  </p>
+                </div>
+              </div>
 
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 mb-1">Status</p>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          magangData.status.toLowerCase() === "aktif"
-                            ? "bg-green-100 text-green-800"
-                            : magangData.status.toLowerCase() === "selesai"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        {magangData.status}
-                      </span>
-                    </div>
+              <div className="flex items-start gap-3">
+                <Building2 className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">Jurusan</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {siswaData?.jurusan || magangData?.major || "-"}
+                  </p>
+                </div>
+              </div>
+
+              {hasMagang && (
+                <div className="flex items-start gap-3">
+                  <MapPin className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 mb-1">Alamat Perusahaan</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {magangData.address || "-"}
+                    </p>
                   </div>
+                </div>
+              )}
+
+              <div className="flex items-start gap-3">
+                <CheckCircle className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">
+                    {hasMagang ? "Status Magang" : "Status Pengajuan"}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
+                      {statusConfig.icon}
+                      <span className="ml-1">{statusConfig.label}</span>
+                    </span>
+                    {!hasMagang && (
+                      <p className="text-xs text-gray-500">Belum memiliki magang</p>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {statusConfig.description}
+                  </p>
                 </div>
               </div>
             </div>
-          ) : (
-            /* Tidak ada magang */
-            <div className="bg-white shadow-sm rounded-xl p-6 md:p-8 border border-gray-100 text-center">
-              <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Belum Memiliki Magang
-              </h3>
-              <p className="text-gray-500 mb-4 max-w-md mx-auto">
-                Anda belum memiliki magang aktif. Silakan daftar ke DUDI yang
-                tersedia.
-              </p>
+          </div>
+
+          {/* Status Message */}
+          {!hasMagang && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-start gap-3">
+                <Building2 className="h-5 w-5 text-gray-400 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900 mb-1">
+                    Informasi Magang
+                  </h3>
+                  <p className="text-xs text-gray-600">
+                    {currentStatus === "pending" 
+                      ? "Pengajuan magang Anda sedang dalam proses verifikasi. Silakan tunggu konfirmasi dari guru pembimbing."
+                      : currentStatus === "ditolak"
+                      ? "Pengajuan magang Anda ditolak. Silakan hubungi guru pembimbing untuk informasi lebih lanjut."
+                      : "Anda belum memiliki tempat magang. Silakan hubungi guru pembimbing untuk proses pendaftaran."}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>
-      </div>
+      )}
 
-      {/* ✅ TOMBOL FIXED QR CODE/DOWNLOAD (Pojok Kanan Bawah) */}
-      {canShowQrButton && (
+      {/* TOMBOL QR CODE/DOWNLOAD (hanya untuk magang selesai) */}
+      {canShowQrButton && !loading && (
         <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 flex flex-col items-end space-y-3 z-50">
           {/* QR CODE POPUP / MODAL */}
           {showQr && (
@@ -380,7 +509,7 @@ export default function MagangPage() {
 
           {/* KELOMPOK TOMBOL */}
           <div className="flex flex-col md:flex-row gap-2 md:gap-3">
-            {/* Tombol Scan (Memunculkan QR) */}
+            {/* Tombol Scan */}
             <button
               onClick={() => setShowQr(!showQr)}
               className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white font-medium rounded-full shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-105 active:scale-95"

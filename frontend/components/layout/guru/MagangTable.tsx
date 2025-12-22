@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import { useMagangMutations } from "@/hooks/useMagang";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useMagangMutations, useMagangBatch } from "@/hooks/useMagang";
+import { useNotification } from "@/components/ui/Notification/NotificationContext";
 import {
   User,
   Building2,
@@ -12,10 +13,10 @@ import {
   Mail,
   Trash2,
   Search,
-  Plus,
+  RefreshCw,
 } from "lucide-react";
 import { MagangModal } from "../guru/update/MagangModal";
-import initEcho, { disconnectEcho } from "@/lib/echo";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type ExtendedStatus =
   | "pending"
@@ -53,10 +54,15 @@ interface ProcessedMagang {
   originalStatus: string;
 }
 
+interface MagangStats {
+  total_siswa: number;
+  aktif: number;
+  selesai: number;
+  pending: number;
+}
+
 interface MagangTableProps {
-  magangData: any[];
-  siswaData: any[];
-  dudiData?: any[];
+  onStatsUpdated?: (stats: MagangStats) => void;
   onDataUpdated?: (updatedMagang: any[]) => void;
 }
 
@@ -102,243 +108,128 @@ const getStatusLabel = (status: ExtendedStatus) => {
   }
 };
 
+// ================ SKELETON LOADING COMPONENT ================
+const TableSkeleton = () => {
+  return (
+    <tbody className="bg-white divide-y divide-gray-100">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <tr key={i} className="animate-pulse">
+          {/* Kolom Siswa */}
+          <td className="px-4 py-4">
+            <div className="flex items-start space-x-3">
+              <div className="h-9 w-9 bg-gray-200 rounded-full shrink-0"></div>
+              <div className="space-y-2 flex-1">
+                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+              </div>
+            </div>
+          </td>
+          
+          {/* Kolom Kelas & Jurusan */}
+          <td className="px-4 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/3"></div>
+              <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+            </div>
+          </td>
+          
+          {/* Kolom DUDI */}
+          <td className="px-4 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-full"></div>
+              <div className="h-3 bg-gray-200 rounded w-3/4"></div>
+            </div>
+          </td>
+          
+          {/* Kolom Periode */}
+          <td className="px-4 py-4">
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          </td>
+          
+          {/* Kolom Status */}
+          <td className="px-4 py-4">
+            <div className="h-6 bg-gray-200 rounded-full w-24"></div>
+          </td>
+          
+          {/* Kolom Nilai */}
+          <td className="px-4 py-4">
+            <div className="h-6 bg-gray-200 rounded-full w-8 mx-auto"></div>
+          </td>
+          
+          {/* Kolom Aksi */}
+          <td className="px-4 py-4">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
+              <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  );
+};
+
 export default function MagangTable({
-  magangData: initialMagangData,
-  siswaData,
-  dudiData = [],
+  onStatsUpdated,
   onDataUpdated,
 }: MagangTableProps) {
+  const {
+    magang: magangData,
+    siswa: siswaData,
+    isLoading,
+    isValidating,
+    isCached,
+    forceRefresh,
+    markAsDeleted,
+  } = useMagangBatch({
+    realTime: true,
+    pollingInterval: 3000,
+  });
+
   const {
     createMagang,
     updateMagang,
     deleteMagang,
     loading: mutating,
+    clearCache,
   } = useMagangMutations();
+
+  const { showNotification } = useNotification();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMagang, setEditingMagang] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [entriesPerPage, setEntriesPerPage] = useState(5);
+  const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
-  const [realtimeStatus, setRealtimeStatus] = useState<string>("Not connected");
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
-  const [magangData, setMagangData] = useState<any[]>(initialMagangData || []);
-  const [isInitialized, setIsInitialized] = useState(false);
   const prevMagangDataRef = useRef<any[]>([]);
+  const prevStatsRef = useRef<MagangStats | null>(null);
+  const mountedRef = useRef(false);
 
-  // ⚠️ FIX: Hanya update saat data awal berubah (sekali saja)
-  useEffect(() => {
-    if (!isInitialized && initialMagangData.length > 0) {
-      setMagangData(initialMagangData);
-      setIsInitialized(true);
-    }
-  }, [initialMagangData, isInitialized]);
-
-  // ⚠️ FIX: Gunakan debounce dan cegah infinite loop
-  useEffect(() => {
-    if (!onDataUpdated || !isInitialized) return;
-
-    // Cek apakah data benar-benar berubah
-    const hasChanged =
-      JSON.stringify(magangData) !== JSON.stringify(prevMagangDataRef.current);
-
-    if (hasChanged) {
-      console.log("Magang data changed, notifying parent...");
-      prevMagangDataRef.current = magangData;
-
-      // Debounce untuk mencegah terlalu banyak update
-      const timeoutId = setTimeout(() => {
-        onDataUpdated(magangData);
-      }, 100);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [magangData, onDataUpdated, isInitialized]);
-
-  useEffect(() => {
-    console.log("Initializing realtime connection...");
-
-    const echo = initEcho();
-    const channel = echo.channel("magang");
-
-    channel.listen(".magang.created", (data: any) => {
-      console.log("Realtime: Magang CREATED event received", data);
-      setRealtimeStatus(`Created: ${data.siswa_nama}`);
-
-      setMagangData((prev) => {
-        const exists = prev.find((item) => item.id === data.id);
-        if (!exists) {
-          const newMagang = {
-            id: data.id,
-            siswa_id: data.siswa_id,
-            dudi_id: data.dudi_id,
-            tanggal_mulai: data.tanggal_mulai || new Date().toISOString(),
-            tanggal_selesai: data.tanggal_selesai || new Date().toISOString(),
-            status: data.status,
-            nilai_akhir: data.nilai_akhir,
-            siswa: {
-              id: data.siswa_id,
-              nama: data.siswa_nama,
-              nis: "",
-              email: "",
-              kelas: "",
-              jurusan: "",
-              telepon: "",
-            },
-            dudi: {
-              id: data.dudi_id,
-              nama_perusahaan: data.dudi_nama,
-              alamat: "",
-              telepon: "",
-              email: "",
-            },
-          };
-          return [newMagang, ...prev];
-        }
-        return prev;
-      });
-    });
-
-    channel.listen(".magang.updated", (data: any) => {
-      console.log("Realtime: Magang UPDATED event received", data);
-      setRealtimeStatus(`Updated: ${data.siswa_nama} → ${data.status}`);
-
-      setMagangData((prev) => {
-        return prev.map((item) => {
-          if (item.id === data.id) {
-            return {
-              ...item,
-              siswa_id: data.siswa_id,
-              dudi_id: data.dudi_id,
-              status: data.status,
-              nilai_akhir: data.nilai_akhir,
-              tanggal_mulai: data.tanggal_mulai || item.tanggal_mulai,
-              tanggal_selesai: data.tanggal_selesai || item.tanggal_selesai,
-              siswa: {
-                ...item.siswa,
-                nama: data.siswa_nama || item.siswa?.nama,
-              },
-              dudi: {
-                ...item.dudi,
-                nama_perusahaan: data.dudi_nama || item.dudi?.nama_perusahaan,
-              },
-            };
-          }
-          return item;
-        });
-      });
-    });
-
-    channel.listen(".magang.deleted", (data: any) => {
-      console.log("Realtime: Magang DELETED event received", data);
-      setRealtimeStatus(`Deleted: ${data.siswa_nama}`);
-
-      setMagangData((prev) => prev.filter((item) => item.id !== data.id));
-    });
-
-    echo.connector.pusher.connection.bind("connected", () => {
-      console.log("Connected to Soketi");
-      setRealtimeStatus("Connected to Soketi");
-    });
-
-    echo.connector.pusher.connection.bind("disconnected", () => {
-      console.log("Disconnected from Soketi");
-      setRealtimeStatus("Disconnected");
-    });
-
-    return () => {
-      console.log("Cleaning up realtime connection...");
-      disconnectEcho();
+  // ================ CALCULATE STATS ================
+  const calculateStats = useCallback((data: any[]): MagangStats => {
+    const processedData = processMagangData(data);
+    
+    return {
+      total_siswa: processedData.length,
+      aktif: processedData.filter((m) => m.status === "berlangsung").length,
+      selesai: processedData.filter((m) => m.status === "selesai").length,
+      pending: processedData.filter((m) => m.status === "pending").length,
     };
   }, []);
 
-  const handleOpenCreateModal = () => {
-    setEditingMagang(null);
-    setIsModalOpen(true);
-  };
+  // ================ PROCESS DATA ================
+  const processMagangData = useCallback((data: any[]): ProcessedMagang[] => {
+    if (!data || data.length === 0) return [];
 
-  const handleOpenEditModal = (magang: any) => {
-    setEditingMagang(magang);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setEditingMagang(null);
-  };
-
-  const handleSaveMagang = async (formData: any) => {
-    try {
-      const payload = {
-        ...formData,
-        nilai_akhir: formData.nilai_akhir || undefined,
-      };
-
-      if (editingMagang) {
-        const tempId = `temp-${Date.now()}`;
-        setMagangData((prev) =>
-          prev.map((item) =>
-            item.id === editingMagang.id
-              ? { ...item, ...payload, id: tempId }
-              : item
-          )
-        );
-
-        await updateMagang(editingMagang.id, payload);
-
-        setMagangData((prev) =>
-          prev.map((item) =>
-            item.id === tempId ? { ...item, id: editingMagang.id } : item
-          )
-        );
-      } else {
-        const tempId = `temp-${Date.now()}`;
-        const newMagang = {
-          id: tempId,
-          ...payload,
-          siswa: siswaData.find((s: any) => s.id === payload.siswa_id),
-          dudi: dudiData.find((d: any) => d.id === payload.dudi_id),
-        };
-
-        setMagangData((prev) => [newMagang, ...prev]);
-        await createMagang(payload);
-      }
-
-      handleCloseModal();
-      alert("Data magang berhasil disimpan");
-      return true;
-    } catch (err: any) {
-      // Rollback ke data awal jika error
-      setMagangData(initialMagangData);
-      alert(err.message || "Terjadi kesalahan");
-      return false;
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus data magang ini?")) return;
-
-    let deletedItem: any;
-
-    try {
-      deletedItem = magangData.find((item) => item.id === id);
-      setMagangData((prev) => prev.filter((item) => item.id !== id));
-
-      await deleteMagang(id);
-      alert("Data magang berhasil dihapus");
-    } catch (err: any) {
-      if (deletedItem) {
-        setMagangData((prev) => [...prev, deletedItem]);
-      }
-      alert(err.message || "Terjadi kesalahan");
-    }
-  };
-
-  const processedMagangList = useMemo(() => {
-    if (!magangData || magangData.length === 0) return [];
-
-    const extendedMagangList: ProcessedMagang[] = magangData.map(
+    const extendedMagangList: ProcessedMagang[] = data.map(
       (item: any) => ({
         ...item,
         status: item.status as ExtendedStatus,
@@ -379,10 +270,134 @@ export default function MagangTable({
         status: displayStatus,
       };
     });
-  }, [magangData]);
+  }, []);
+
+  // ================ REAL-TIME STATS UPDATE ================
+  useEffect(() => {
+    if (!mountedRef.current || !magangData || magangData.length === 0) return;
+
+    const currentStats = calculateStats(magangData);
+    
+    // Kirim stats ke parent jika berubah
+    if (!prevStatsRef.current || 
+        JSON.stringify(prevStatsRef.current) !== JSON.stringify(currentStats)) {
+      prevStatsRef.current = currentStats;
+      
+      if (onStatsUpdated) {
+        onStatsUpdated(currentStats);
+      }
+    }
+
+    // Kirim data ke parent jika berubah
+    if (onDataUpdated && 
+        JSON.stringify(prevMagangDataRef.current) !== JSON.stringify(magangData)) {
+      prevMagangDataRef.current = [...magangData];
+      onDataUpdated(magangData);
+    }
+  }, [magangData, calculateStats, onStatsUpdated, onDataUpdated]);
+
+  // Set mounted
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // ================ HANDLERS ================
+  const handleOpenEditModal = useCallback((magang: any) => {
+    setEditingMagang(magang);
+    setIsModalOpen(true);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setIsModalOpen(false);
+    setEditingMagang(null);
+  }, []);
+
+  const handleSaveMagang = useCallback(async (formData: any) => {
+    try {
+      const payload = {
+        ...formData,
+        nilai_akhir: formData.nilai_akhir || undefined,
+      };
+
+      if (editingMagang) {
+        await updateMagang(editingMagang.id, payload);
+        showNotification("Data magang berhasil diperbarui", "success");
+      } else {
+        await createMagang(payload);
+        showNotification("Data magang berhasil ditambahkan", "success");
+      }
+
+      handleCloseModal();
+      return true;
+    } catch (error: any) {
+      showNotification(
+        error.message || "Terjadi kesalahan saat menyimpan data",
+        "error"
+      );
+      return false;
+    }
+  }, [editingMagang, updateMagang, createMagang, showNotification, handleCloseModal]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    if (!confirm("Yakin ingin menghapus data magang ini?")) return;
+
+    try {
+      setDeletingIds(prev => new Set([...prev, id]));
+      markAsDeleted(id);
+
+      await deleteMagang(id);
+      
+      setDeletingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      
+      showNotification("Data magang berhasil dihapus", "success");
+    } catch (error: any) {
+      setDeletingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      
+      showNotification(
+        error.message || "Terjadi kesalahan saat menghapus data",
+        "error"
+      );
+    }
+  }, [deleteMagang, markAsDeleted, showNotification]);
+
+  const handleManualRefresh = useCallback(async () => {
+    try {
+      await forceRefresh();
+      showNotification("Data berhasil diperbarui", "success");
+    } catch {
+      showNotification("Gagal memperbarui data", "error");
+    }
+  }, [forceRefresh, showNotification]);
+
+  const handleClearCache = useCallback(async () => {
+    try {
+      await clearCache();
+      showNotification("Cache berhasil dibersihkan", "success");
+    } catch {
+      showNotification("Gagal membersihkan cache", "error");
+    }
+  }, [clearCache, showNotification]);
+
+  // ================ FILTER & PAGINATION ================
+  const processedMagangList = useMemo(() => {
+    return processMagangData(magangData);
+  }, [magangData, processMagangData]);
 
   const filteredData = useMemo(() => {
     return processedMagangList.filter((m) => {
+      if (deletingIds.has(m.id)) return false;
+      
       const matchesSearch =
         m.siswa?.nama?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         m.siswa?.nis?.toString().includes(searchTerm) ||
@@ -396,15 +411,39 @@ export default function MagangTable({
 
       return matchesSearch && matchesStatus;
     });
-  }, [processedMagangList, searchTerm, statusFilter]);
+  }, [processedMagangList, searchTerm, statusFilter, deletingIds]);
 
-  const totalPages = Math.ceil(filteredData.length / entriesPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / entriesPerPage));
   const startIndex = (currentPage - 1) * entriesPerPage;
   const paginatedData = useMemo(() => {
     return filteredData.slice(startIndex, startIndex + entriesPerPage);
   }, [filteredData, startIndex, entriesPerPage]);
 
-  const formatDate = (dateString: string) => {
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  const dudiList = useMemo(() => {
+    if (!magangData || magangData.length === 0) return [];
+    
+    const uniqueDudis = new Map();
+    magangData.forEach((item: any) => {
+      if (item.dudi && !uniqueDudis.has(item.dudi.id)) {
+        uniqueDudis.set(item.dudi.id, {
+          id: item.dudi.id,
+          nama_perusahaan: item.dudi.nama_perusahaan,
+          alamat: item.dudi.alamat || "",
+          telepon: item.dudi.telepon || "",
+          email: item.dudi.email || "",
+          penanggung_jawab: item.dudi.penanggung_jawab || "",
+        });
+      }
+    });
+    
+    return Array.from(uniqueDudis.values());
+  }, [magangData]);
+
+  const formatDate = useCallback((dateString: string) => {
     if (!dateString) return "-";
     try {
       return new Date(dateString).toLocaleDateString("id-ID", {
@@ -415,40 +454,10 @@ export default function MagangTable({
     } catch {
       return "-";
     }
-  };
+  }, []);
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <button
-            onClick={handleOpenCreateModal}
-            disabled={mutating}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus className="h-4 w-4" />
-            Tambah Magang
-          </button>
-        </div>
-
-        <div className="text-sm text-gray-600">
-          <div className="flex items-center gap-2">
-            <div
-              className={`h-2 w-2 rounded-full ${
-                realtimeStatus.includes("Connected")
-                  ? "bg-green-500"
-                  : realtimeStatus.includes("Disconnected")
-                  ? "bg-red-500"
-                  : "bg-yellow-500"
-              }`}
-            ></div>
-            <span className="max-w-xs truncate">
-              Realtime: {realtimeStatus}
-            </span>
-          </div>
-        </div>
-      </div>
-
       {isModalOpen && (
         <MagangModal
           isOpen={isModalOpen}
@@ -465,17 +474,47 @@ export default function MagangTable({
             jurusan: s.jurusan,
             telepon: s.telepon || "",
           }))}
-          dudiList={dudiData.map((d: any) => ({
-            id: d.id,
-            nama_perusahaan: d.nama_perusahaan,
-            alamat: d.alamat || "",
-            telepon: d.telepon || "",
-            email: d.email || "",
-            penanggung_jawab: d.penanggung_jawab || "",
-          }))}
+          dudiList={dudiList}
         />
       )}
 
+      {/* Header tetap muncul walaupun loading */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Data Magang</h2>
+          <div className="flex items-center gap-2 mt-1">
+            <div className={`h-2 w-2 rounded-full ${isCached ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <span className="text-xs text-gray-500">
+              {isValidating ? "Memperbarui..." : isCached ? "Data cache" : "Data realtime"}
+            </span>
+            {deletingIds.size > 0 && (
+              <span className="text-xs text-orange-500">
+                • Menghapus {deletingIds.size} data
+              </span>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex gap-2">
+          <button
+            onClick={handleClearCache}
+            disabled={mutating || isValidating || isLoading}
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Clear Cache
+          </button>
+          <button
+            onClick={handleManualRefresh}
+            disabled={isValidating || mutating || isLoading}
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} />
+            {isValidating ? "Memperbarui..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {/* Search & Filters tetap muncul */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-lg">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -484,7 +523,8 @@ export default function MagangTable({
             placeholder="Cari siswa, NIS, kelas, jurusan, DUDI..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors shadow-sm"
+            disabled={isLoading}
+            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
         </div>
 
@@ -497,7 +537,8 @@ export default function MagangTable({
               id="filter-status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm"
+              disabled={isLoading}
+              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
               <option value="all">Semua</option>
               <option value="pending">Pending</option>
@@ -506,7 +547,6 @@ export default function MagangTable({
               <option value="berlangsung">Berlangsung</option>
               <option value="selesai">Selesai</option>
               <option value="dibatalkan">Dibatalkan</option>
-              <option value="terdaftar">Terdaftar</option>
             </select>
           </div>
 
@@ -521,183 +561,209 @@ export default function MagangTable({
                 setEntriesPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm"
+              disabled={isLoading}
+              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
-              <option value={5}>5</option>
               <option value={10}>10</option>
               <option value={25}>25</option>
               <option value={50}>50</option>
+              <option value={100}>100</option>
             </select>
           </div>
         </div>
       </div>
 
+      {/* Tabel dengan skeleton loading */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Siswa
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Kelas & Jurusan
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   DUDI
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Periode
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Nilai
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Aksi
                 </th>
               </tr>
             </thead>
 
-            <tbody className="bg-white divide-y divide-gray-100">
-              {paginatedData.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-3 py-4">
-                    <div className="flex items-start space-x-3">
-                      <div className="h-9 w-9 flex items-center justify-center rounded-full bg-cyan-100 text-blue-600 shrink-0">
-                        <User className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">
-                          {m.siswa?.nama || "N/A"}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          NIS: {m.siswa?.nis || "N/A"}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          <Mail className="inline h-3 w-3 mr-1" />
-                          {m.siswa?.email || "Email tidak tersedia"}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="px-3 py-4 text-sm text-gray-600">
-                    <p className="font-medium text-gray-800">
-                      {m.siswa?.kelas || "N/A"}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {m.siswa?.jurusan || "N/A"}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      <Phone className="inline h-3 w-3 mr-1" />
-                      {m.siswa?.telepon || "N/A"}
-                    </p>
-                  </td>
-
-                  <td className="px-3 py-4 text-sm">
-                    <div className="flex items-center space-x-2">
-                      <Building2 className="h-4 w-4 text-gray-400" />
-                      <p className="font-medium text-gray-800 truncate">
-                        {m.dudi?.nama_perusahaan || "N/A"}
+            {/* TAMPILKAN SKELETON SAAT LOADING PERTAMA KALI */}
+            {isLoading && magangData.length === 0 ? (
+              <TableSkeleton />
+            ) : filteredData.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <div className="text-center py-12">
+                      <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500 font-medium mb-1">
+                        {searchTerm || statusFilter !== "all"
+                          ? "Tidak ada data yang sesuai"
+                          : "Belum ada data magang"}
+                      </p>
+                      <p className="text-sm text-gray-400">
+                        {searchTerm && "Coba ubah kata kunci pencarian"}
                       </p>
                     </div>
-                    <div className="flex items-center text-xs text-gray-500 mt-1 truncate">
-                      <MapPin className="h-3 w-3 mr-2 text-gray-400 shrink-0" />
-                      <span className="truncate">
-                        {m.dudi?.alamat || "N/A"}
-                      </span>
-                    </div>
-                  </td>
-
-                  <td className="px-3 py-4 text-sm text-gray-600">
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="h-4 w-4 text-gray-400 shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-gray-800">
-                          {formatDate(m.tanggal_mulai)}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          s.d {formatDate(m.tanggal_selesai)}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="px-3 py-4">
-                    <span
-                      className={`px-3 py-1 text-xs font-semibold rounded-full border ${getStatusClasses(
-                        m.status
-                      )}`}
-                    >
-                      {getStatusLabel(m.status)}
-                    </span>
-                  </td>
-
-                  <td className="px-3 py-4">
-                    {m.nilai_akhir ? (
-                      <span className="px-3 py-1 text-xs font-bold rounded-full bg-yellow-400 text-gray-800">
-                        {m.nilai_akhir}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </td>
-
-                  <td className="px-3 py-4 text-left text-sm font-medium">
-                    <button
-                      onClick={() => handleOpenEditModal(m)}
-                      disabled={mutating}
-                      className="text-gray-400 hover:text-blue-600 transition-colors p-1 rounded-md mr-2 disabled:opacity-50"
-                      title="Edit Magang"
-                    >
-                      <SquarePen className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(m.id)}
-                      disabled={mutating}
-                      className="text-gray-400 hover:text-red-600 transition-colors p-1 rounded-md disabled:opacity-50"
-                      title="Hapus Magang"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              </tbody>
+            ) : (
+              <tbody className="bg-white divide-y divide-gray-100">
+                {paginatedData.map((m) => {
+                  const isDeleting = deletingIds.has(m.id);
+                  
+                  return (
+                    <tr 
+                      key={m.id} 
+                      className={`hover:bg-gray-50 transition-colors ${isDeleting ? 'opacity-50 animate-pulse' : ''}`}
+                    >
+                      <td className="px-4 py-4">
+                        <div className="flex items-start space-x-3">
+                          <div className="h-9 w-9 flex items-center justify-center rounded-full bg-cyan-100 text-blue-600 shrink-0">
+                            <User className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-900 truncate">
+                              {m.siswa?.nama || "N/A"}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              NIS: {m.siswa?.nis || "N/A"}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">
+                              <Mail className="inline h-3 w-3 mr-1" />
+                              {m.siswa?.email || "Email tidak tersedia"}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4 text-sm text-gray-600">
+                        <p className="font-medium text-gray-800">
+                          {m.siswa?.kelas || "N/A"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {m.siswa?.jurusan || "N/A"}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">
+                          <Phone className="inline h-3 w-3 mr-1" />
+                          {m.siswa?.telepon || "N/A"}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4 text-sm">
+                        <div className="flex items-center space-x-2">
+                          <Building2 className="h-4 w-4 text-gray-400 shrink-0" />
+                          <p className="font-medium text-gray-800 truncate">
+                            {m.dudi?.nama_perusahaan || "N/A"}
+                          </p>
+                        </div>
+                        <div className="flex items-center text-xs text-gray-500 mt-1 truncate">
+                          <MapPin className="h-3 w-3 mr-2 text-gray-400 shrink-0" />
+                          <span className="truncate">
+                            {m.dudi?.alamat || "N/A"}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4 text-sm text-gray-600">
+                        <div className="flex items-center space-x-2">
+                          <Calendar className="h-4 w-4 text-gray-400 shrink-0" />
+                          <div>
+                            <p className="text-xs font-medium text-gray-800">
+                              {formatDate(m.tanggal_mulai)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              s.d {formatDate(m.tanggal_selesai)}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <span
+                          className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full border ${getStatusClasses(
+                            m.status
+                          )}`}
+                        >
+                          {getStatusLabel(m.status)}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {m.nilai_akhir ? (
+                          <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
+                            {m.nilai_akhir}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-sm">-</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4 text-left text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenEditModal(m)}
+                            disabled={mutating || isDeleting}
+                            className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-50"
+                          >
+                            <SquarePen className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(m.id)}
+                            disabled={mutating || isDeleting}
+                            className={`transition-colors p-1.5 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50 ${
+                              isDeleting 
+                                ? 'text-red-400' 
+                                : 'text-gray-400 hover:text-red-600'
+                            }`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            )}
           </table>
         </div>
 
-        {filteredData.length === 0 && (
-          <div className="text-center py-12">
-            <User className="h-12 w-12 text-gray-300 mx-auto mb-2" />
-            <p className="text-gray-500">
-              {searchTerm || statusFilter !== "all"
-                ? "Tidak ada data yang sesuai dengan pencarian"
-                : "Belum ada data magang"}
-            </p>
-          </div>
-        )}
-
-        {filteredData.length > 0 && (
+        {/* Pagination - hanya tampil jika sudah ada data */}
+        {!isLoading && filteredData.length > 0 && totalPages > 1 && (
           <div className="flex flex-col sm:flex-row justify-between items-center px-6 py-4 border-t border-gray-200 text-sm text-gray-600 gap-4">
             <span className="text-center sm:text-left">
               Menampilkan {startIndex + 1} sampai{" "}
               {Math.min(startIndex + entriesPerPage, filteredData.length)} dari{" "}
               {filteredData.length} entri
             </span>
-            <div className="flex space-x-1">
+            <div className="flex items-center space-x-1">
               <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                aria-label="Previous page"
+                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 &lt;
               </button>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                 let pageNum;
                 if (totalPages <= 5) {
                   pageNum = i + 1;
@@ -713,25 +779,21 @@ export default function MagangTable({
                   <button
                     key={pageNum}
                     onClick={() => setCurrentPage(pageNum)}
-                    className={`p-2 border rounded-lg transition-colors w-10 ${
+                    className={`w-10 h-10 flex items-center justify-center border rounded-lg transition-colors ${
                       currentPage === pageNum
-                        ? "bg-blue-600 text-white"
-                        : "hover:bg-gray-100"
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "border-gray-300 hover:bg-gray-100"
                     }`}
-                    aria-label={`Page ${pageNum}`}
-                    aria-current={currentPage === pageNum ? "page" : undefined}
                   >
                     {pageNum}
                   </button>
                 );
               })}
+              
               <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                aria-label="Next page"
+                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 &gt;
               </button>

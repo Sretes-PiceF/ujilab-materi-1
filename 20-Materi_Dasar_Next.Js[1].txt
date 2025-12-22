@@ -150,7 +150,7 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Cara scan QR untuk menuju detail data
 
 ===========================================
-	Ini untuk Data magang Siswa(OTW INI)
+		Selesai
 ===========================================
 
 ---
@@ -206,7 +206,6 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 ============================================
 		Selesai
 ============================================
-ec5e1d2483acedae5c51bc0d0c011d2cc6ec59aa629be37cf26b3193b03e34ff
 
 ---
 

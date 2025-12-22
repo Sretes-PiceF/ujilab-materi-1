@@ -71,20 +71,31 @@ class Magang extends Model
 
         // Broadcast saat created
         static::created(function ($magang) {
-            Log::info('Magang Created Event', ['id' => $magang->id]);
-            broadcast(new \App\Events\MagangCreated($magang))->toOthers();
+            try {
+                $magang->load(['siswa.user', 'dudi']); // ✅ LOAD RELATIONS
+                broadcast(new \App\Events\guru\magang\MagangUpdated($magang, 'created'))->toOthers();
+            } catch (\Exception $e) {
+                Log::error('Broadcast created failed: ' . $e->getMessage());
+            }
         });
 
         // Broadcast saat updated
         static::updated(function ($magang) {
-            Log::info('Magang Updated Event', ['id' => $magang->id]);
-            broadcast(new \App\Events\MagangUpdated($magang))->toOthers();
+            try {
+                $magang->load(['siswa.user', 'dudi']); // ✅ LOAD RELATIONS
+                broadcast(new \App\Events\guru\magang\MagangUpdated($magang, 'updated'))->toOthers();
+            } catch (\Exception $e) {
+                Log::error('Broadcast updated failed: ' . $e->getMessage());
+            }
         });
 
         // Broadcast saat deleted
         static::deleted(function ($magang) {
-            Log::info('Magang Deleted Event', ['id' => $magang->id]);
-            broadcast(new \App\Events\MagangDeleted($magang->id))->toOthers();
+            try {
+                broadcast(new \App\Events\guru\magang\MagangDeleted($magang->id))->toOthers();
+            } catch (\Exception $e) {
+                Log::error('Broadcast deleted failed: ' . $e->getMessage());
+            }
         });
     }
 }

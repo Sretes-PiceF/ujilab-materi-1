@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class Logbook extends Model
 {
@@ -36,7 +37,6 @@ class Logbook extends Model
         'optimized_size' => 'integer',
     ];
 
-
     protected $appends = [
         'image_url',
         'original_image_url',
@@ -47,61 +47,49 @@ class Logbook extends Model
         'best_thumbnail_url',
     ];
 
+    // ========================================
+    // ACCESSORS FOR IMAGE URLS
+    // ========================================
+
     public function getImageUrlAttribute()
     {
-        // Prioritize webp for modern browsers
         if ($this->webp_image && request()->header('Accept') && str_contains(request()->header('Accept'), 'image/webp')) {
             return asset('storage/' . $this->webp_image);
         }
 
-        // Fallback to original image
         if ($this->original_image) {
             return asset('storage/' . $this->original_image);
         }
 
-        // Legacy support
         return $this->file ? asset('storage/' . $this->file) : null;
     }
 
-    /**
-     * URL gambar terbaik (untuk frontend modern)
-     */
     public function getBestImageUrlAttribute()
     {
-        // Return WebP jika ada
         if ($this->webp_image) {
             return asset('storage/' . $this->webp_image);
         }
 
-        // Fallback ke original
         if ($this->original_image) {
             return asset('storage/' . $this->original_image);
         }
 
-        // Legacy
         return $this->file ? asset('storage/' . $this->file) : null;
     }
 
-    /**
-     * URL thumbnail terbaik
-     */
     public function getBestThumbnailUrlAttribute()
     {
-        // Prioritize WebP thumbnail
         if ($this->webp_thumbnail) {
             return asset('storage/' . $this->webp_thumbnail);
         }
 
-        // Fallback ke regular thumbnail
         if ($this->thumbnail) {
             return asset('storage/' . $this->thumbnail);
         }
 
-        // Fallback ke gambar utama
         return $this->getBestImageUrlAttribute();
     }
 
-    // Add accessors for image URLs
     public function getOriginalImageUrlAttribute()
     {
         if ($this->original_image) {
@@ -134,9 +122,10 @@ class Logbook extends Model
         return null;
     }
 
-    /**
-     * Persentase penghematan
-     */
+    // ========================================
+    // FILE SIZE HELPERS
+    // ========================================
+
     public function getCompressionPercentageAttribute()
     {
         if ($this->original_size && $this->optimized_size && $this->original_size > 0) {
@@ -145,9 +134,6 @@ class Logbook extends Model
         return 0;
     }
 
-    /**
-     * Format file size untuk display
-     */
     public function getOriginalSizeFormattedAttribute()
     {
         return $this->formatBytes($this->original_size);
@@ -171,34 +157,29 @@ class Logbook extends Model
         return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
+    // ========================================
+    // RELATIONSHIPS
+    // ========================================
 
-    /**
-     * Relasi ke tabel magang
-     */
     public function magang()
     {
         return $this->belongsTo(Magang::class, 'magang_id');
     }
 
-    /**
-     * Accessor untuk mendapatkan data siswa melalui magang
-     */
     public function getSiswaAttribute()
     {
         return $this->magang?->siswa;
     }
 
-    /**
-     * Accessor untuk mendapatkan data DUDI melalui magang
-     */
     public function getDudiAttribute()
     {
         return $this->magang?->dudi;
     }
 
-    /**
-     * Scope untuk filter berdasarkan status verifikasi
-     */
+    // ========================================
+    // SCOPES
+    // ========================================
+
     public function scopeByStatus($query, $status)
     {
         if ($status && $status !== 'all') {
@@ -207,9 +188,6 @@ class Logbook extends Model
         return $query;
     }
 
-    /**
-     * Scope untuk pencarian
-     */
     public function scopeSearch($query, $search)
     {
         if ($search) {
@@ -220,5 +198,52 @@ class Logbook extends Model
                 ->orWhere('kendala', 'ILIKE', "%{$search}%");
         }
         return $query;
+    }
+
+    // ========================================
+    // BOOT METHOD - AUTO BROADCAST
+    // ========================================
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Broadcast saat created
+        static::created(function ($logbook) {
+            try {
+                $logbook->load(['magang.siswa.user', 'magang.dudi']);
+                broadcast(new \App\Events\guru\logbook\LogbookUpdated($logbook, 'created'))->toOthers();
+
+                // Auto-invalidate cache
+                \App\Http\Controllers\Api\LogbookController::invalidateCache();
+            } catch (\Exception $e) {
+                Log::error('Logbook Broadcast created failed: ' . $e->getMessage());
+            }
+        });
+
+        // Broadcast saat updated
+        static::updated(function ($logbook) {
+            try {
+                $logbook->load(['magang.siswa.user', 'magang.dudi']);
+                broadcast(new \App\Events\guru\logbook\LogbookUpdated($logbook, 'updated'))->toOthers();
+
+                // Auto-invalidate cache
+                \App\Http\Controllers\Api\LogbookController::invalidateCache();
+            } catch (\Exception $e) {
+                Log::error('Logbook Broadcast updated failed: ' . $e->getMessage());
+            }
+        });
+
+        // Broadcast saat deleted
+        static::deleted(function ($logbook) {
+            try {
+                broadcast(new \App\Events\guru\logbook\LogbookDeleted($logbook->id))->toOthers();
+
+                // Auto-invalidate cache
+                \App\Http\Controllers\Api\LogbookController::invalidateCache();
+            } catch (\Exception $e) {
+                Log::error('Logbook Broadcast deleted failed: ' . $e->getMessage());
+            }
+        });
     }
 }

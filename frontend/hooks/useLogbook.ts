@@ -1,221 +1,310 @@
-// hooks/useLogbook.ts
-import { useState, useEffect, useCallback } from 'react';
+'use client';
 
-// Interface untuk data logbook
+import { useState } from 'react';
+import useSWR from 'swr';
+import api from '@/lib/axios';
+
+// ============= TYPES =============
+export interface Siswa {
+  id: number;
+  nama: string;
+  nis: string;
+  kelas: string;
+  jurusan: string;
+  email: string;
+}
+
+export interface Dudi {
+  id: number;
+  nama_perusahaan: string;
+}
+
 export interface LogbookEntry {
-    id: number;
-    magang_id: number;
-    tanggal: string;
-    tanggal_formatted: string;
-    kegiatan: string;
-    kendala: string;
-    file: string | null;
-    status_verifikasi: 'pending' | 'disetujui' | 'ditolak';
-    original_image?: string;
-    webp_image?: string;
-    webp_thumbnail?: string;
-  original_size?: number;      // Tambahkan ini
-  optimized_size?: number;     // Tambahkan in
-    catatan_guru: string | null;
-    catatan_dudi: string | null;
-    siswa: {
-        id: number;
-        nama: string;
-        nis: string;
-        kelas: string;
-        jurusan: string;
-        email: string;
-    };
-    dudi: {
-        id: number;
-        nama_perusahaan: string;
-    };
-    created_at: string;
-    updated_at: string;
+  id: number;
+  magang_id: number;
+  tanggal: string;
+  tanggal_formatted: string;
+  kegiatan: string;
+  kendala: string;
+  file: string | null;
+  status_verifikasi: 'pending' | 'disetujui' | 'ditolak';
+  original_image?: string;
+  webp_image?: string;
+  webp_thumbnail?: string;
+  original_size?: number;
+  optimized_size?: number;
+  catatan_guru: string | null;
+  catatan_dudi: string | null;
+  siswa: Siswa;
+  dudi: Dudi;
+  created_at: string;
+  updated_at: string;
 }
 
-// Interface untuk meta pagination
-export interface PaginationMeta {
-    current_page: number;
-    last_page: number;
-    per_page: number;
-    total: number;
-    from: number | null;
-    to: number | null;
+export interface LogbookStats {
+  total_logbook: number;
+  belum_diverifikasi: number;
+  disetujui: number;
+  ditolak: number;
 }
 
+interface BatchLogbookData {
+  stats: LogbookStats;
+  logbook_list: LogbookEntry[];
+  timestamp: string;
+}
+
+interface CreateLogbookData {
+  magang_id: number;
+  tanggal: string;
+  kegiatan: string;
+  kendala: string;
+  file?: File;
+}
+
+interface UpdateLogbookData {
+  kegiatan: string;
+  kendala: string;
+  file?: File;
+  remove_file?: boolean;
+  status_verifikasi?: string;
+  catatan_guru?: string;
+}
+
+interface ApiResponse<T> {
+  success: boolean;
+  message?: string;
+  data?: T;
+  errors?: Record<string, string[]>;
+  cached?: boolean;
+  cache_ttl?: number;
+}
+
+// ============= FETCHER =============
+const fetcher = (url: string) => api.get(url).then(res => res.data);
+
+// ============= BATCH HOOK (MAIN HOOK) =============
+/**
+ * Hook utama untuk fetch SEMUA data logbook dalam 1 request
+ * Menggantikan multiple requests jadi 1
+ */
+export function useLogbookBatch() {
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<BatchLogbookData>>(
+    '/guru/logbook/batch',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 5000, // Cache 5 detik
+      revalidateOnMount: true,
+    }
+  );
+
+  return {
+    // Stats
+    stats: data?.data?.stats || {
+      total_logbook: 0,
+      belum_diverifikasi: 0,
+      disetujui: 0,
+      ditolak: 0,
+    },
+    
+    // Logbook List
+    logbook: data?.data?.logbook_list || [],
+    
+    // Meta
+    isLoading,
+    error,
+    isCached: data?.cached || false,
+    timestamp: data?.data?.timestamp || null,
+    
+    // Actions
+    refresh: mutate,
+  };
+}
+
+// ============= INDIVIDUAL HOOKS (Fallback) =============
+/**
+ * Hook untuk fetch logbook list saja
+ * Gunakan ini kalau tidak butuh stats
+ */
 export function useLogbook() {
-    const [logbookList, setLogbookList] = useState<LogbookEntry[]>([]);
-    const [meta, setMeta] = useState<PaginationMeta>({
-        current_page: 1,
-        last_page: 1,
-        per_page: 10,
-        total: 0,
-        from: null,
-        to: null,
-    });
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<LogbookEntry[]>>(
+    '/guru/logbook',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 5000,
+    }
+  );
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  return {
+    logbook: data?.data || [],
+    isLoading,
+    error,
+    refresh: mutate,
+  };
+}
 
-    // Get token from localStorage
-    const getToken = () => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('access_token');
+/**
+ * Hook untuk fetch stats saja
+ */
+export function useLogbookStats() {
+  const { data, error, mutate, isLoading } = useSWR<ApiResponse<LogbookStats>>(
+    '/logbook',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 10000,
+    }
+  );
+
+  return {
+    stats: data?.data || {
+      total_logbook: 0,
+      belum_diverifikasi: 0,
+      disetujui: 0,
+      ditolak: 0,
+    },
+    isLoading,
+    error,
+    refresh: mutate,
+  };
+}
+
+// ============= MUTATIONS HOOK =============
+/**
+ * Hook untuk CRUD operations
+ */
+export function useLogbookMutations() {
+  const [loading, setLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+
+  const createLogbook = async (data: CreateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const formData = new FormData();
+      formData.append('magang_id', data.magang_id.toString());
+      formData.append('tanggal', data.tanggal);
+      formData.append('kegiatan', data.kegiatan);
+      formData.append('kendala', data.kendala);
+      if (data.file) {
+        formData.append('file', data.file);
+      }
+
+      const response = await api.post<ApiResponse<LogbookEntry>>(
+        '/guru/logbook/create',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
         }
-        return null;
-    };
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 422) {
+        setValidationErrors(error.response.data.errors || {});
+        throw new Error(error.response.data.message || 'Validasi gagal');
+      }
+      throw new Error(error.response?.data?.message || 'Gagal membuat logbook');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Fetch daftar logbook
-    const fetchLogbook = useCallback(async (params?: {
-        page?: number;
-        per_page?: number;
-        search?: string;
-        status?: string;
-        silent?: boolean;
-    }) => {
-        try {
-            setLoading(true);
-            setError(null);
+  const updateLogbook = async (id: number, data: UpdateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+    setLoading(true);
+    setValidationErrors({});
 
-            const token = getToken();
-            if (!token) {
-                throw new Error('Token tidak ditemukan');
-            }
+    try {
+      const formData = new FormData();
+      formData.append('kegiatan', data.kegiatan);
+      formData.append('kendala', data.kendala);
+      
+      if (data.file) {
+        formData.append('file', data.file);
+      }
+      
+      if (data.remove_file) {
+        formData.append('remove_file', '1');
+      }
+      
+      if (data.status_verifikasi) {
+        formData.append('status_verifikasi', data.status_verifikasi);
+      }
+      
+      if (data.catatan_guru) {
+        formData.append('catatan_guru', data.catatan_guru);
+      }
 
-            // Build query string
-            const queryParams = new URLSearchParams();
-            if (params?.page) queryParams.append('page', params.page.toString());
-            if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
-            if (params?.search) queryParams.append('search', params.search);
-            if (params?.status && params.status !== 'all') queryParams.append('status', params.status);
-
-            const response = await fetch(
-                `${API_URL}/logbook`,
-                {
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        "ngrok-skip-browser-warning": "true",
-                    },
-                }
-            );
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            if (result.success) {
-                setLogbookList(result.data);
-                if (result.meta) {
-                    setMeta(result.meta);
-                }
-            } else {
-                throw new Error(result.message || 'Gagal mengambil data logbook');
-            }
-        } catch (err) {
-            console.error('Error fetching logbook:', err);
-            setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
-        } finally {
-            setLoading(false);
+      const response = await api.post<ApiResponse<LogbookEntry>>(
+        `/logbook/update/${id}`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
         }
-    }, [API_URL]);
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 422) {
+        setValidationErrors(error.response.data.errors || {});
+        throw new Error(error.response.data.message || 'Validasi gagal');
+      }
+      throw new Error(error.response?.data?.message || 'Gagal mengupdate logbook');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Fetch detail logbook
-    const fetchLogbookDetail = useCallback(async (id: number) => {
-        try {
-            const token = getToken();
-            if (!token) {
-                throw new Error('Token tidak ditemukan');
-            }
+  const deleteLogbook = async (id: number): Promise<ApiResponse<null>> => {
+    setLoading(true);
+    setValidationErrors({});
 
-            const response = await fetch(`${API_URL}/guru/logbook/${id}`, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    "ngrok-skip-browser-warning": "true",
-                },
-            });
+    try {
+      const response = await api.delete<ApiResponse<null>>(`/logbook/delete/${id}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Gagal menghapus logbook');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+  const verifikasiLogbook = async (
+    id: number,
+    data: { status_verifikasi: string; catatan_guru?: string }
+  ): Promise<ApiResponse<LogbookEntry>> => {
+    setLoading(true);
+    setValidationErrors({});
 
-            const result = await response.json();
+    try {
+      const response = await api.put<ApiResponse<LogbookEntry>>(
+        `/logbook/${id}/verifikasi`,
+        data
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 422) {
+        setValidationErrors(error.response.data.errors || {});
+        throw new Error(error.response.data.message || 'Validasi gagal');
+      }
+      throw new Error(error.response?.data?.message || 'Gagal memverifikasi logbook');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            if (result.success) {
-                return { success: true, data: result.data };
-            } else {
-                throw new Error(result.message || 'Gagal mengambil detail logbook');
-            }
-        } catch (err) {
-            console.error('Error fetching logbook detail:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan',
-            };
-        }
-    }, [API_URL]);
-
-    // Verifikasi logbook
-    const verifikasiLogbook = useCallback(async (
-        id: number,
-        data: { status_verifikasi: string; catatan_guru?: string }
-    ) => {
-        try {
-            const token = getToken();
-            if (!token) {
-                throw new Error('Token tidak ditemukan');
-            }
-
-            const response = await fetch(`${API_URL}/guru/logbook/${id}/verifikasi`, {
-                method: 'PUT',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    "ngrok-skip-browser-warning": "true",
-                },
-                body: JSON.stringify(data),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            if (result.success) {
-                return { success: true, message: result.message };
-            } else {
-                throw new Error(result.message || 'Gagal memverifikasi logbook');
-            }
-        } catch (err) {
-            console.error('Error verifying logbook:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan',
-            };
-        }
-    }, [API_URL]);
-
-    // Initial fetch
-    useEffect(() => {
-        fetchLogbook();
-    }, [fetchLogbook]);
-
-    return {
-        logbookList,
-        meta,
-        loading,
-        error,
-        fetchLogbook,
-        fetchLogbookDetail,
-        verifikasiLogbook,
-    };
+  return {
+    createLogbook,
+    updateLogbook,
+    deleteLogbook,
+    verifikasiLogbook,
+    loading,
+    validationErrors,
+    clearErrors: () => setValidationErrors({}),
+  };
 }

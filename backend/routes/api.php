@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\BatchController;
+use App\Http\Controllers\Api\DudiSiswa;
+use App\Http\Controllers\Api\LogbookController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DudiGuruController;
@@ -11,9 +13,11 @@ use App\Http\Controllers\LogbookSiswaController;
 use App\Http\Controllers\MagangGuruController;
 use App\Http\Controllers\MagangSiswaController;
 use App\Http\Controllers\SiswaController;
+use App\Http\Middleware\CorsMiddleware;
 use App\Http\Middleware\GuruMiddleware;
 use App\Http\Middleware\SiswaMiddleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 
@@ -24,7 +28,9 @@ Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
 Route::post('/register/siswa', [AuthController::class, 'registerSiswa']);
 Route::post('/register/guru', [AuthController::class, 'registerGuru']);
 Route::post('/login', [AuthController::class, 'login']);
-
+Route::post('/broadcasting/auth', function (\Illuminate\Http\Request $request) {
+    return Broadcast::auth($request);
+})->middleware(['api', 'auth:sanctum']);
 
 // Protected routes - butuh authentication
 Route::middleware('auth:sanctum')->group(function () {
@@ -46,8 +52,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
             //Route DUdi
             Route::get('dudi/aktif', [DudiSiswaController::class, 'getDudiAktif']);
-            Route::get('dudi/{id}', [DudiSiswaController::class, 'show']);
             Route::post('dudi/{dudi_id}/daftar', [DudiSiswaController::class, 'store']);
+            Route::get('/dudi/batch', [DudiSiswa::class, 'getDudiBatchData']);
+            Route::get('/dudi/batch/fresh', [DudiSiswa::class, 'getDudiBatchDataFresh']);
+            Route::get('dudi/{id}', [DudiSiswaController::class, 'show']);
 
             //Route statistic
             Route::get('/statistik', [DashboardController::class, 'getStatistikSiswa']);
@@ -85,7 +93,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/logbook/{id}', [LogbookGuruController::class, 'show']);
         Route::post('/logbook/update/{id}', [LogbookGuruController::class, 'update']);
         Route::delete('/logbook/delete/{id}', [LogbookGuruController::class, 'destroy']);
-        // Verifikasi logbook
         Route::put('/logbook/{id}/verifikasi', [LogbookGuruController::class, 'verifikasi']);
 
 
@@ -99,10 +106,12 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 });
 
-
-
-Route::get('/magang/batch', [BatchController::class, 'getMagangData']);
-
+Route::middleware([CorsMiddleware::class])->group(function () {
+    Route::get('/magang/batch', [BatchController::class, 'getMagangData']);
+    Route::get('/guru/logbook/batch', [LogbookController::class, 'getLogbookData']);
+    Route::get('/guru/logbook/batch/fresh', [LogbookController::class, 'getFreshData']);
+    Route::post('/guru/logbook/batch/clear-cache', [LogbookController::class, 'clearCache']);
+});
 
 Route::get('/health', function () {
     return response()->json([
@@ -110,15 +119,4 @@ Route::get('/health', function () {
         'redis' => Cache::has('health_check') ? 'connected' : 'disconnected',
         'timestamp' => now(),
     ]);
-});
-
-// Items CRUD with cache
-Route::prefix('items')->group(function () {
-    Route::get('/', [ItemController::class, 'index']);
-    Route::get('/{id}', [ItemController::class, 'show']);
-    Route::post('/', [ItemController::class, 'store']);
-    Route::put('/{id}', [ItemController::class, 'update']);
-    Route::patch('/{id}', [ItemController::class, 'update']);
-    Route::delete('/{id}', [ItemController::class, 'destroy']);
-    Route::post('/clear-cache', [ItemController::class, 'clearCache']);
 });

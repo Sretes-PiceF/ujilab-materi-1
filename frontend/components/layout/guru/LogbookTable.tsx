@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useLogbookMutations, LogbookEntry } from "@/hooks/useLogbook";
+import { useNotification } from "@/components/ui/Notification/NotificationContext";
 import {
   User,
   Calendar,
@@ -9,20 +11,23 @@ import {
   MoreHorizontal,
   Trash2,
   CheckSquare,
+  Search,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useLogbook, LogbookEntry } from "@/hooks/useLogbook";
 import { LogbookUpdateModal } from "../guru/update/LogbookModal";
 import LogbookDetailModal from "./detail/LogbookDetail";
-import { supabase } from "@/lib/supabaseClient";
+import initEcho, { disconnectEcho } from "@/lib/echo";
 
-// Fungsi untuk mendapatkan class CSS berdasarkan status
+interface LogbookTableProps {
+  logbookData: LogbookEntry[];
+  onDataUpdated?: (updatedLogbook: LogbookEntry[]) => void;
+}
+
 const getStatusClasses = (status: LogbookEntry["status_verifikasi"]) => {
   switch (status) {
     case "disetujui":
@@ -49,317 +54,194 @@ const getStatusLabel = (status: LogbookEntry["status_verifikasi"]) => {
   }
 };
 
-// Komponen Loading Skeleton
-const TableLoadingSkeleton = () => {
-  return (
-    <tbody className="bg-white divide-y divide-gray-100">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <tr key={i} className="animate-pulse">
-          <td className="px-3 py-4">
-            <div className="flex items-start space-x-3">
-              <div className="h-9 w-9 bg-gray-200 rounded-full shrink-0"></div>
-              <div className="space-y-2 flex-1">
-                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-              </div>
-            </div>
-          </td>
-          <td className="px-3 py-4">
-            <div className="space-y-2">
-              <div className="h-4 bg-gray-200 rounded w-full"></div>
-              <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-              <div className="h-4 bg-gray-200 rounded w-full"></div>
-              <div className="h-4 bg-gray-200 rounded w-4/5"></div>
-            </div>
-          </td>
-          <td className="px-3 py-4">
-            <div className="h-6 bg-gray-200 rounded-lg w-24"></div>
-          </td>
-          <td className="px-3 py-4">
-            <div className="space-y-2">
-              <div className="h-4 bg-gray-200 rounded w-full"></div>
-              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-            </div>
-          </td>
-          <td className="px-3 py-4">
-            <div className="h-8 w-8 bg-gray-200 rounded-md"></div>
-          </td>
-        </tr>
-      ))}
-    </tbody>
-  );
-};
-
-export function LogbookTable() {
-  const { logbookList, meta, error, fetchLogbook } = useLogbook();
+export default function LogbookTable({
+  logbookData: initialLogbookData,
+  onDataUpdated,
+}: LogbookTableProps) {
+  const { updateLogbook, deleteLogbook, loading: mutating } = useLogbookMutations();
+  const { showNotification } = useNotification();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
-  const [processing, setProcessing] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // State untuk modal
-  const [selectedUpdateLogbook, setSelectedUpdateLogbook] =
-    useState<LogbookEntry | null>(null);
+  const [logbookData, setLogbookData] = useState<LogbookEntry[]>(initialLogbookData || []);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const prevLogbookDataRef = useRef<LogbookEntry[]>([]);
+
+  const [selectedUpdateLogbook, setSelectedUpdateLogbook] = useState<LogbookEntry | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showStatusUpdate, setShowStatusUpdate] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedDetailLogbook, setSelectedDetailLogbook] =
-    useState<LogbookEntry | null>(null);
+  const [selectedDetailLogbook, setSelectedDetailLogbook] = useState<LogbookEntry | null>(null);
 
-  // Initial load
+  // ✅ INISIALISASI DATA
   useEffect(() => {
-    const loadInitialData = async () => {
-      setIsLoading(true);
-      try {
-        await fetchLogbook({
-          page: currentPage,
-          per_page: entriesPerPage,
-          search: searchTerm,
-          status: statusFilter,
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    if (!isInitialized && initialLogbookData.length > 0) {
+      setLogbookData(initialLogbookData);
+      setIsInitialized(true);
+    }
+  }, [initialLogbookData, isInitialized]);
 
-    loadInitialData();
-  }, []);
-
-  // Debounced search
+  // ✅ CALLBACK UNTUK UPDATE DATA KE PARENT
   useEffect(() => {
-    if (isLoading) return; // Skip jika masih loading awal
+    if (!onDataUpdated || !isInitialized) return;
 
-    const timer = setTimeout(async () => {
-      setIsRefreshing(true);
-      try {
-        await fetchLogbook({
-          page: currentPage,
-          per_page: entriesPerPage,
-          search: searchTerm,
-          status: statusFilter,
-        });
-      } finally {
-        setIsRefreshing(false);
-      }
-    }, 500);
+    const hasChanged = JSON.stringify(logbookData) !== JSON.stringify(prevLogbookDataRef.current);
 
-    return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter, entriesPerPage, currentPage]);
+    if (hasChanged) {
+      prevLogbookDataRef.current = logbookData;
 
-  // Real-time subscription
+      const timeoutId = setTimeout(() => {
+        onDataUpdated(logbookData);
+      }, 100);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [logbookData, onDataUpdated, isInitialized]);
+
+  // ✅ REALTIME ECHO LISTENERS
   useEffect(() => {
-    if (!supabase) return;
+    const echo = initEcho();
+    const channel = echo.channel("logbook");
 
-    const channel = supabase
-      .channel("logbook-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "logbook",
-        },
-        async () => {
-          await handleAutoRefresh();
+    channel.listen(".logbook.created", (data: any) => {
+      showNotification(`Logbook ${data.siswa_nama} berhasil ditambahkan`, "success");
+
+      setLogbookData((prev) => {
+        const exists = prev.find((item) => item.id === data.id);
+        if (!exists) {
+          const newLogbook: LogbookEntry = {
+            id: data.id,
+            magang_id: data.magang_id,
+            tanggal: data.tanggal || new Date().toISOString(),
+            tanggal_formatted: data.tanggal_formatted || "",
+            kegiatan: data.kegiatan || "",
+            kendala: data.kendala || "",
+            file: data.file || null,
+            status_verifikasi: data.status_verifikasi || "pending",
+            catatan_guru: data.catatan_guru || null,
+            catatan_dudi: data.catatan_dudi || null,
+            siswa: {
+              id: data.siswa_id,
+              nama: data.siswa_nama,
+              nis: "",
+              kelas: "",
+              jurusan: "",
+              email: "",
+            },
+            dudi: {
+              id: data.dudi_id,
+              nama_perusahaan: data.dudi_nama || "",
+            },
+            created_at: data.created_at || new Date().toISOString(),
+            updated_at: data.updated_at || new Date().toISOString(),
+          };
+          return [newLogbook, ...prev];
         }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "logbook",
-        },
-        async (payload) => {
-          if (
-            payload.new.status_verifikasi !== payload.old?.status_verifikasi
-          ) {
-            await handleAutoRefresh();
+        return prev;
+      });
+    });
+
+    channel.listen(".logbook.updated", (data: any) => {
+      showNotification(`Logbook ${data.siswa_nama} berhasil diperbarui`, "success");
+
+      setLogbookData((prev) => {
+        return prev.map((item) => {
+          if (item.id === data.id) {
+            return {
+              ...item,
+              kegiatan: data.kegiatan || item.kegiatan,
+              kendala: data.kendala || item.kendala,
+              status_verifikasi: data.status_verifikasi || item.status_verifikasi,
+              catatan_guru: data.catatan_guru || item.catatan_guru,
+              file: data.file || item.file,
+            };
           }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "logbook",
-        },
-        async () => {
-          await handleAutoRefresh();
-        }
-      )
-      .subscribe();
+          return item;
+        });
+      });
+    });
+
+    channel.listen(".logbook.deleted", (data: any) => {
+      showNotification(`Logbook ${data.siswa_nama} berhasil dihapus`, "success");
+      setLogbookData((prev) => prev.filter((item) => item.id !== data.id));
+    });
 
     return () => {
-      if (supabase) {
-        supabase.removeChannel(channel);
-      }
+      disconnectEcho();
     };
-  }, []);
+  }, [showNotification]);
 
-  // Auto-refresh function
-  const handleAutoRefresh = useCallback(async () => {
-    try {
-      await fetchLogbook({
-        page: currentPage,
-        per_page: entriesPerPage,
-        search: searchTerm,
-        status: statusFilter,
-      });
-    } catch (error) {
-      // Silent error handling
-    }
-  }, [currentPage, entriesPerPage, searchTerm, statusFilter, fetchLogbook]);
-
-  // Handle filter changes
-  const handleStatusChange = (newStatus: string) => {
-    setStatusFilter(newStatus);
-    setCurrentPage(1);
-  };
-
-  const handleEntriesPerPageChange = (newPerPage: number) => {
-    setEntriesPerPage(newPerPage);
-    setCurrentPage(1);
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setCurrentPage(newPage);
-  };
-
-  // Handler untuk delete logbook
-  const handleDelete = async (entry: LogbookEntry) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus logbook ini?")) {
-      return;
-    }
-
-    setProcessing(entry.id);
-
-    try {
-      const token = localStorage.getItem("access_token");
-      const response = await fetch(
-        `${
-          process.env.NEXT_PUBLIC_API_URL ||
-          `http://localhost:8000/api/logbook/delete/${entry.id}`
-        }/logbook/delete/${entry.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-            "ngrok-skip-browser-warning": "true",
-          },
-        }
-      );
-
-      const result = await response.json();
-
-      if (result.success) {
-        await fetchLogbook({
-          page: currentPage,
-          per_page: entriesPerPage,
-          search: searchTerm,
-          status: statusFilter,
-        });
-        alert("Logbook berhasil dihapus");
-      } else {
-        alert(result.message || "Gagal menghapus logbook");
-      }
-    } catch (err) {
-      alert("Terjadi kesalahan saat menghapus logbook");
-    } finally {
-      setProcessing(null);
-    }
-  };
-
-  // Handler untuk update status
+  // ✅ HANDLERS
   const handleUpdateStatus = (entry: LogbookEntry) => {
     setSelectedUpdateLogbook(entry);
     setShowStatusUpdate(true);
     setShowUpdateModal(true);
   };
 
-  // Handler untuk update logbook
   const handleUpdateLogbook = async (data: any) => {
     if (!selectedUpdateLogbook) return false;
 
-    setProcessing(selectedUpdateLogbook.id);
+    const tempId = selectedUpdateLogbook.id;
 
     try {
-      const token = localStorage.getItem("access_token");
-
-      const formDataToSend = new FormData();
-      formDataToSend.append("kegiatan", data.kegiatan);
-      formDataToSend.append("kendala", data.kendala);
-
-      if (data.file) {
-        formDataToSend.append("file", data.file);
-      }
-
-      if (data.removeFile) {
-        formDataToSend.append("remove_file", "1");
-      }
-
-      if (showStatusUpdate && data.status_verifikasi) {
-        formDataToSend.append("status_verifikasi", data.status_verifikasi);
-        if (data.catatan_guru) {
-          formDataToSend.append("catatan_guru", data.catatan_guru);
-        }
-      }
-
-      const response = await fetch(
-        `${
-          process.env.NEXT_PUBLIC_API_URL ||
-          `http://localhost:8000/api/logbook/update/${selectedUpdateLogbook.id}`
-        }/logbook/update/${selectedUpdateLogbook.id}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-            "ngrok-skip-browser-warning": "true",
-          },
-          body: formDataToSend,
-        }
+      // Optimistic update
+      setLogbookData((prev) =>
+        prev.map((item) =>
+          item.id === tempId
+            ? {
+                ...item,
+                kegiatan: data.kegiatan,
+                kendala: data.kendala,
+                status_verifikasi: data.status_verifikasi || item.status_verifikasi,
+                catatan_guru: data.catatan_guru || item.catatan_guru,
+              }
+            : item
+        )
       );
 
-      const result = await response.json();
+      await updateLogbook(selectedUpdateLogbook.id, data);
 
-      if (result.success) {
-        await fetchLogbook({
-          page: currentPage,
-          per_page: entriesPerPage,
-          search: searchTerm,
-          status: statusFilter,
-        });
+      showNotification(
+        showStatusUpdate
+          ? "Logbook dan status verifikasi berhasil diupdate"
+          : "Logbook berhasil diupdate",
+        "success"
+      );
 
-        if (showStatusUpdate) {
-          alert("Logbook dan status verifikasi berhasil diupdate");
-        } else {
-          alert("Logbook berhasil diupdate");
-        }
-        return true;
-      } else {
-        alert(result.message || "Gagal mengupdate logbook");
-        return false;
-      }
-    } catch (err) {
-      alert("Terjadi kesalahan saat mengupdate logbook");
+      handleCloseModal();
+      return true;
+    } catch (err: any) {
+      // Rollback
+      setLogbookData(initialLogbookData);
+      showNotification(err.message || "Terjadi kesalahan saat menyimpan data", "error");
       return false;
-    } finally {
-      setProcessing(null);
     }
   };
 
-  // Handler untuk view detail
+  const handleDelete = async (id: number) => {
+    if (!confirm("Yakin ingin menghapus logbook ini?")) return;
+
+    let deletedItem: LogbookEntry | undefined;
+
+    try {
+      deletedItem = logbookData.find((item) => item.id === id);
+      setLogbookData((prev) => prev.filter((item) => item.id !== id));
+
+      await deleteLogbook(id);
+      showNotification("Logbook berhasil dihapus", "success");
+    } catch (err: any) {
+      if (deletedItem) {
+        setLogbookData((prev) => [...prev, deletedItem!]);
+      }
+      showNotification(err.message || "Terjadi kesalahan saat menghapus data", "error");
+    }
+  };
+
   const handleViewDetail = (entry: LogbookEntry) => {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_LARAVEL_BASE_URL || "http://localhost:8000";
+    const baseUrl = process.env.NEXT_PUBLIC_LARAVEL_BASE_URL || "http://localhost:8000";
 
     const formattedEntry = {
       ...entry,
@@ -376,344 +258,292 @@ export function LogbookTable() {
         : undefined,
     };
 
-    setSelectedDetailLogbook(formattedEntry);
+    setSelectedDetailLogbook(formattedEntry as any);
     setIsDetailModalOpen(true);
   };
 
-  const getPageNumbers = () => {
-    const totalPages = meta.last_page || 1;
-    const maxPagesToShow = 5;
-
-    let startPage = Math.max(1, currentPage - 2);
-    const endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-
-    if (endPage - startPage + 1 < maxPagesToShow) {
-      startPage = Math.max(1, endPage - maxPagesToShow + 1);
-    }
-
-    return Array.from(
-      { length: endPage - startPage + 1 },
-      (_, i) => startPage + i
-    );
+  const handleCloseModal = () => {
+    setShowUpdateModal(false);
+    setSelectedUpdateLogbook(null);
+    setShowStatusUpdate(false);
   };
 
-  if (error) {
-    return (
-      <Card className="shadow-sm rounded-lg border-0">
-        <CardContent className="p-6">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-red-700">Error: {error}</p>
-            <button
-              onClick={() => fetchLogbook()}
-              className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Coba Lagi
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  // ✅ FILTERING & PAGINATION
+  const filteredData = useMemo(() => {
+    return logbookData.filter((item) => {
+      const matchesSearch =
+        item.siswa?.nama?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.siswa?.nis?.toString().includes(searchTerm) ||
+        item.kegiatan?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.kendala?.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesStatus = statusFilter === "all" || item.status_verifikasi === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [logbookData, searchTerm, statusFilter]);
+
+  const totalPages = Math.ceil(filteredData.length / entriesPerPage);
+  const startIndex = (currentPage - 1) * entriesPerPage;
+  const paginatedData = useMemo(() => {
+    return filteredData.slice(startIndex, startIndex + entriesPerPage);
+  }, [filteredData, startIndex, entriesPerPage]);
 
   return (
-    <>
-      <Card className="shadow-sm rounded-lg border-0">
-        <CardHeader className="py-4 px-6 border-b border-gray-200">
-          <div className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center text-xl font-semibold text-gray-900">
-              <BookOpen className="h-5 w-5 mr-2 text-cyan-600" />
-              Daftar Logbook Harian
-            </CardTitle>
-          </div>
-        </CardHeader>
+    <div className="space-y-6">
+      {/* SEARCH & FILTER */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-lg">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Cari siswa, kegiatan, atau kendala..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors shadow-sm"
+          />
+        </div>
 
-        <CardContent className="p-6">
-          {/* BARIS PENCARIAN & FILTER */}
-          <div className="flex items-center justify-between mb-6 space-x-4">
-            <div className="w-full max-w-lg">
-              <input
-                type="text"
-                placeholder="Cari siswa, kegiatan, atau kendala..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                disabled={isLoading}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#0097BB] focus:border-transparent transition-colors shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-              />
-            </div>
-
-            <div className="flex items-center text-sm text-gray-600 space-x-4">
-              <div className="flex items-center">
-                <label htmlFor="filter-status" className="mr-2">
-                  Status:
-                </label>
-                <select
-                  id="filter-status"
-                  value={statusFilter}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  disabled={isLoading}
-                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                >
-                  <option value="all">Semua</option>
-                  <option value="pending">Belum Diverifikasi</option>
-                  <option value="disetujui">Disetujui</option>
-                  <option value="ditolak">Ditolak</option>
-                </select>
-              </div>
-
-              <div className="flex items-center">
-                <label
-                  htmlFor="show-entries"
-                  className="mr-2 whitespace-nowrap"
-                >
-                  Per halaman:
-                </label>
-                <select
-                  id="show-entries"
-                  value={entriesPerPage}
-                  onChange={(e) =>
-                    handleEntriesPerPageChange(Number(e.target.value))
-                  }
-                  disabled={isLoading}
-                  className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-[#0097BB] focus:border-[#0097BB] appearance-none bg-white transition-colors text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                </select>
-              </div>
-            </div>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+          <div className="flex items-center">
+            <label htmlFor="filter-status" className="mr-2 whitespace-nowrap">
+              Status:
+            </label>
+            <select
+              id="filter-status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm"
+            >
+              <option value="all">Semua</option>
+              <option value="pending">Belum Diverifikasi</option>
+              <option value="disetujui">Disetujui</option>
+              <option value="ditolak">Ditolak</option>
+            </select>
           </div>
 
-          {/* TABLE LOGBOOK */}
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-white">
-                <tr>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-1/6">
-                    Tanggal & Foto
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-1/3">
-                    Kegiatan & Kendala
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-auto">
-                    Status
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-1/4">
-                    Catatan Verifikasi
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
+          <div className="flex items-center">
+            <label htmlFor="show-entries" className="mr-2 whitespace-nowrap">
+              Per halaman:
+            </label>
+            <select
+              id="show-entries"
+              value={entriesPerPage}
+              onChange={(e) => {
+                setEntriesPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="py-2 pl-3 pr-8 border border-gray-200 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white transition-colors text-sm"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
-              {/* Loading State */}
-              {isLoading ? (
-                <TableLoadingSkeleton />
-              ) : logbookList.length === 0 ? (
-                <tbody className="bg-white">
-                  <tr>
-                    <td colSpan={5} className="px-3 py-8 text-center">
-                      <BookOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
-                      <p className="text-gray-500">
-                        {searchTerm || statusFilter !== "all"
-                          ? "Tidak ada data logbook yang sesuai dengan pencarian"
-                          : "Belum ada data logbook"}
+      {/* TABLE */}
+      <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Siswa & Tanggal
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Kegiatan & Kendala
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Catatan
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Aksi
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="bg-white divide-y divide-gray-100">
+              {paginatedData.map((entry) => (
+                <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-3 py-4">
+                    <div className="flex items-start space-x-3">
+                      <div className="h-9 w-9 flex items-center justify-center rounded-full bg-cyan-100 text-blue-600 shrink-0">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">
+                          {entry.siswa?.nama || "N/A"}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          NIS: {entry.siswa?.nis || "N/A"}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          <Calendar className="inline h-3 w-3 mr-1" />
+                          {entry.tanggal_formatted}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-4 text-sm">
+                    <p className="font-medium text-gray-800">
+                      <span className="font-bold">Kegiatan:</span>{" "}
+                      {entry.kegiatan.length > 100
+                        ? `${entry.kegiatan.substring(0, 100)}...`
+                        : entry.kegiatan}
+                    </p>
+                    <p className="mt-2 text-gray-600">
+                      <span className="font-bold">Kendala:</span>{" "}
+                      {entry.kendala.length > 100
+                        ? `${entry.kendala.substring(0, 100)}...`
+                        : entry.kendala}
+                    </p>
+                  </td>
+
+                  <td className="px-3 py-4">
+                    <span
+                      className={`px-3 py-1 text-xs font-semibold rounded-full border ${getStatusClasses(
+                        entry.status_verifikasi
+                      )}`}
+                    >
+                      {getStatusLabel(entry.status_verifikasi)}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-4 text-sm text-gray-600">
+                    <p>
+                      <span className="font-bold">Guru:</span>{" "}
+                      {entry.catatan_guru || "Belum ada"}
+                    </p>
+                    {entry.catatan_dudi && (
+                      <p className="mt-1">
+                        <span className="font-bold">DUDI:</span> {entry.catatan_dudi}
                       </p>
-                    </td>
-                  </tr>
-                </tbody>
-              ) : (
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {logbookList.map((entry) => (
-                    <tr
-                      key={entry.id}
-                      className="hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-3 py-4 align-top whitespace-nowrap">
-                        <div className="flex items-start space-x-3">
-                          <div className="h-9 w-9 flex items-center justify-center rounded-full bg-cyan-100 text-[#0097BB] shrink-0">
-                            <User className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-gray-900">
-                              {entry.siswa.nama}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              NIS: {entry.siswa.nis}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">
-                              <Calendar className="inline h-3 w-3 mr-1" />
-                              {entry.tanggal_formatted}
-                            </p>
-                            {(entry.file || entry.webp_image) && (
-                              <p className="text-xs text-[#0097BB] mt-1 italic">
-                                Ada foto dokumentasi
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
+                    )}
+                  </td>
 
-                      <td className="px-3 py-4 align-top text-sm">
-                        <p className="font-medium text-gray-800">
-                          <span className="font-bold text-gray-900">
-                            Kegiatan:
-                          </span>{" "}
-                          {entry.kegiatan.length > 100
-                            ? `${entry.kegiatan.substring(0, 100)}...`
-                            : entry.kegiatan}
-                        </p>
-                        <p className="mt-2 text-gray-600">
-                          <span className="font-bold text-gray-900">
-                            Kendala:
-                          </span>{" "}
-                          {entry.kendala.length > 100
-                            ? `${entry.kendala.substring(0, 100)}...`
-                            : entry.kendala}
-                        </p>
-                      </td>
-
-                      <td className="px-3 py-4 align-top whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 text-xs font-semibold rounded-lg border ${getStatusClasses(
-                            entry.status_verifikasi
-                          )}`}
+                  <td className="px-3 py-4 text-left text-sm font-medium">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className="text-gray-400 hover:text-blue-600 transition-colors p-1 rounded-md"
+                          disabled={mutating}
                         >
-                          {getStatusLabel(entry.status_verifikasi)}
-                        </span>
-                      </td>
+                          <MoreHorizontal className="h-5 w-5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuItem
+                          onClick={() => handleViewDetail(entry)}
+                          className="cursor-pointer"
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          Lihat Detail
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleUpdateStatus(entry)}
+                          className="cursor-pointer"
+                        >
+                          <CheckSquare className="h-4 w-4 mr-2" />
+                          Update Status
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleDelete(entry.id)}
+                          className="cursor-pointer text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Hapus Logbook
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-                      <td className="px-3 py-4 align-top text-sm text-gray-600">
-                        <div className="space-y-2">
-                          <p>
-                            <span className="font-bold text-gray-900">
-                              Guru:
-                            </span>{" "}
-                            {entry.catatan_guru || "Belum ada catatan"}
-                          </p>
-                          {entry.catatan_dudi && (
-                            <p>
-                              <span className="font-bold text-gray-900">
-                                DUDI:
-                              </span>{" "}
-                              {entry.catatan_dudi}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="px-3 py-4 align-top whitespace-nowrap text-left text-sm font-medium">
-                        <div className="flex items-center space-x-2">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                className="text-gray-400 hover:text-[#0097BB] transition-colors p-1 rounded-md"
-                                title="Aksi Lainnya"
-                                disabled={processing === entry.id}
-                              >
-                                {processing === entry.id ? (
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#0097BB]"></div>
-                                ) : (
-                                  <MoreHorizontal className="h-5 w-5" />
-                                )}
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                              <DropdownMenuItem
-                                onClick={() => handleViewDetail(entry)}
-                                className="cursor-pointer"
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                Lihat Detail
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleUpdateStatus(entry)}
-                                className="cursor-pointer"
-                              >
-                                <CheckSquare className="h-4 w-4 mr-2" />
-                                Update Status
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDelete(entry)}
-                                className="cursor-pointer text-red-600 focus:text-red-600"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Hapus Logbook
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              )}
-            </table>
-
-            {/* Pagination */}
-            {!isLoading && logbookList.length > 0 && (
-              <div className="flex justify-between items-center pt-4 border-t border-gray-200 mt-4 text-sm text-gray-600">
-                <span>
-                  Menampilkan {meta.from || 0} sampai {meta.to || 0} dari{" "}
-                  {meta.total} entri
-                </span>
-                <div className="flex space-x-1">
-                  <button
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || isRefreshing}
-                    className="p-2 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    &lt;
-                  </button>
-                  {getPageNumbers().map((page) => (
-                    <button
-                      key={page}
-                      onClick={() => handlePageChange(page)}
-                      disabled={isRefreshing}
-                      className={`p-2 border border-gray-200 rounded-lg transition-colors disabled:cursor-not-allowed ${
-                        currentPage === page
-                          ? "bg-[#0097BB] text-white"
-                          : "hover:bg-gray-100"
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === meta.last_page || isRefreshing}
-                    className="p-2 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    &gt;
-                  </button>
-                </div>
-              </div>
-            )}
+        {filteredData.length === 0 && (
+          <div className="text-center py-12">
+            <BookOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+            <p className="text-gray-500">
+              {searchTerm || statusFilter !== "all"
+                ? "Tidak ada data yang sesuai dengan pencarian"
+                : "Belum ada data logbook"}
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* Modal Update */}
+        {/* PAGINATION */}
+        {filteredData.length > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center px-6 py-4 border-t border-gray-200 text-sm text-gray-600 gap-4">
+            <span className="text-center sm:text-left">
+              Menampilkan {startIndex + 1} sampai{" "}
+              {Math.min(startIndex + entriesPerPage, filteredData.length)} dari{" "}
+              {filteredData.length} entri
+            </span>
+            <div className="flex space-x-1">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                &lt;
+              </button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                let pageNum;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
+
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`p-2 border rounded-lg transition-colors w-10 ${
+                      currentPage === pageNum
+                        ? "bg-blue-600 text-white"
+                        : "hover:bg-gray-100"
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                &gt;
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODALS */}
       <LogbookUpdateModal
         isOpen={showUpdateModal}
-        onClose={() => {
-          setShowUpdateModal(false);
-          setSelectedUpdateLogbook(null);
-          setShowStatusUpdate(false);
-        }}
+        onClose={handleCloseModal}
         onSave={handleUpdateLogbook}
         logbook={selectedUpdateLogbook}
-        title={
-          showStatusUpdate
-            ? "Edit Logbook & Update Status"
-            : "Edit Logbook Siswa"
-        }
+        title={showStatusUpdate ? "Edit Logbook & Update Status" : "Edit Logbook Siswa"}
         showStatusUpdate={showStatusUpdate}
       />
 
-      {/* Modal Detail */}
       <LogbookDetailModal
         isOpen={isDetailModalOpen}
         onClose={() => {
@@ -722,6 +552,6 @@ export function LogbookTable() {
         }}
         entry={selectedDetailLogbook}
       />
-    </>
+    </div>
   );
 }

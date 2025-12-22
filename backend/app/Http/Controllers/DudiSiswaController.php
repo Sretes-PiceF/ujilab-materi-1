@@ -2,20 +2,67 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\Siswa\Dudi\DudiCreated;
 use App\Models\Dudi;
 use App\Models\Magang;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Cache;
 
 class DudiSiswaController extends Controller
 {
+    /**
+     * Clear cache terkait DUDI
+     */
+
+    private function clearDudiCache($studentId = null)
+    {
+        try {
+            $userId = Auth::id() ?? 'guest';
+            $cacheKeys = [
+                "dudi:aktif:{$userId}",
+                "dudi:aktif:guest",
+                "dudi:list:aktif",
+            ];
+
+            if ($studentId) {
+                $cacheKeys[] = "dudi:student:{$studentId}";
+                $cacheKeys[] = "dudi:magang:student:{$studentId}";
+            }
+
+            foreach ($cacheKeys as $key) {
+                Cache::forget($key);
+            }
+
+            if (config('cache.default') === 'redis') {
+                $redis = Cache::getRedis();
+                $keys = $redis->keys('*dudi*');
+                foreach ($keys as $key) {
+                    $cleanKey = str_replace(config('cache.prefix'), '', $key);
+                    Cache::forget($cleanKey);
+                }
+                $magangKeys = $redis->keys('*magang*');
+                foreach ($magangKeys as $key) {
+                    $cleanKey = str_replace(config('cache.prefix'), '', $key);
+                    Cache::forget($cleanKey);
+                }
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to clear DUDI cache: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function getDudiAktif(Request $request)
     {
         try {
             $user = Auth::user();
             $siswa = $user->siswa;
+            $studentId = $siswa ? $siswa->id : null;
 
             if (!$siswa) {
                 return response()->json([
@@ -24,85 +71,75 @@ class DudiSiswaController extends Controller
                 ], 404);
             }
 
-            // ===== PENGECEKAN MAGANG SELESAI (BARU) =====
-            $magangSelesai = Magang::where('siswa_id', $siswa->id)
-                ->where('status', 'selesai')
-                ->with('dudi')
-                ->first();
+            $cacheKey = "dudi:student:{$studentId}";
+            $cacheDuration = 15;
 
-            $sudahPernahMagang = (bool) $magangSelesai;
+            $data = Cache::remember($cacheKey, $cacheDuration, function () use ($siswa) {
+                $magangSelesai = Magang::where('siswa_id', $siswa->id)
+                    ->where('status', 'selesai')
+                    ->with('dudi')
+                    ->first();
 
-            // ===== PENGECEKAN MAGANG AKTIF =====
-            $magangAktif = Magang::where('siswa_id', $siswa->id)
-                ->whereIn('status', ['diterima', 'berlangsung'])
-                ->with('dudi')
-                ->first();
+                $sudahPernahMagang = (bool) $magangSelesai;
 
-            $sudahPunyaMagangAktif = (bool) $magangAktif;
+                $magangAktif = Magang::where('siswa_id', $siswa->id)
+                    ->whereIn('status', ['diterima', 'berlangsung'])
+                    ->with('dudi')
+                    ->first();
 
-            // Hitung jumlah pendaftaran yang masih pending/diterima
-            $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
-                ->whereIn('status', ['pending', 'diterima'])
-                ->count();
+                $sudahPunyaMagangAktif = (bool) $magangAktif;
 
-            // ===== LOGIKA BISA DAFTAR (DIPERBARUI) =====
-            // Siswa bisa daftar jika:
-            // 1. BELUM PERNAH SELESAI MAGANG (paling penting!)
-            // 2. Tidak punya magang aktif
-            // 3. Belum mencapai batas maksimal pendaftaran (3)
-            $bisaDaftar = !$sudahPernahMagang
-                && !$sudahPunyaMagangAktif
-                && $jumlahPendaftaran < 3;
+                $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
+                    ->whereIn('status', ['pending', 'diterima'])
+                    ->count();
 
-            // Get DUDI aktif - TANPA FILTER KUOTA
-            $dudiAktif = Dudi::where('status', 'aktif')
-                ->withCount(['magang as kuota_terisi' => function ($query) {
-                    $query->whereIn('status', ['diterima', 'berlangsung']);
-                }])
-                ->get()
-                ->map(function ($dudi) use ($siswa) {
-                    // Cek apakah siswa sudah mendaftar ke DUDI ini (dalam status apapun)
-                    $sudahDaftar = Magang::where('siswa_id', $siswa->id)
-                        ->where('dudi_id', $dudi->id)
-                        ->whereIn('status', ['pending', 'diterima', 'berlangsung'])
-                        ->exists();
+                $bisaDaftar = !$sudahPernahMagang
+                    && !$sudahPunyaMagangAktif
+                    && $jumlahPendaftaran < 3;
 
-                    // Default kuota (asumsi 10)
-                    $kuotaTotal = 10;
-                    $kuotaTerisi = $dudi->kuota_terisi;
-                    $kuotaTersisa = $kuotaTotal - $kuotaTerisi;
+                $dudiAktif = Dudi::where('status', 'aktif')
+                    ->withCount(['magang as kuota_terisi' => function ($query) {
+                        $query->whereIn('status', ['diterima', 'berlangsung']);
+                    }])
+                    ->get()
+                    ->map(function ($dudi) use ($siswa) {
+                        $sudahDaftar = Magang::where('siswa_id', $siswa->id)
+                            ->where('dudi_id', $dudi->id)
+                            ->whereIn('status', ['pending', 'diterima', 'berlangsung'])
+                            ->exists();
 
-                    return [
-                        'id' => $dudi->id,
-                        'nama_perusahaan' => $dudi->nama_perusahaan,
-                        'alamat' => $dudi->alamat,
-                        'telepon' => $dudi->telepon,
-                        'email' => $dudi->email,
-                        'penanggung_jawab' => $dudi->penanggung_jawab,
-                        'website' => null,
-                        'bidang_usaha' => 'Perusahaan Mitra',
-                        'deskripsi' => 'Perusahaan mitra magang siswa SMK Negeri 6 Malang',
-                        'kuota' => [
-                            'terisi' => $kuotaTerisi,
-                            'total' => $kuotaTotal,
-                            'tersisa' => $kuotaTersisa
-                        ],
-                        'fasilitas' => [],
-                        'persyaratan' => [],
-                        'sudah_daftar' => $sudahDaftar,
-                        'status_dudi' => $dudi->status
-                    ];
-                });
+                        $kuotaTotal = $dudi->kuota_magang ?? 10;
+                        $kuotaTerisi = $dudi->kuota_terisi;
+                        $kuotaTersisa = $kuotaTotal - $kuotaTerisi;
 
-            return response()->json([
-                'success' => true,
-                'data' => [
+                        return [
+                            'id' => $dudi->id,
+                            'nama_perusahaan' => $dudi->nama_perusahaan,
+                            'alamat' => $dudi->alamat,
+                            'telepon' => $dudi->telepon,
+                            'email' => $dudi->email,
+                            'penanggung_jawab' => $dudi->penanggung_jawab,
+                            'website' => $dudi->website ?? null,
+                            'bidang_usaha' => $dudi->bidang_usaha ?? 'Perusahaan Mitra',
+                            'deskripsi' => $dudi->deskripsi ?? 'Perusahaan mitra magang siswa',
+                            'kuota' => [
+                                'terisi' => $kuotaTerisi,
+                                'total' => $kuotaTotal,
+                                'tersisa' => $kuotaTersisa
+                            ],
+                            'fasilitas' => $dudi->fasilitas ? explode(',', $dudi->fasilitas) : [],
+                            'persyaratan' => $dudi->persyaratan ? explode(',', $dudi->persyaratan) : [],
+                            'sudah_daftar' => $sudahDaftar,
+                            'status_dudi' => $dudi->status,
+                            'last_updated' => now()->toDateTimeString()
+                        ];
+                    });
+
+                return [
                     'dudi_aktif' => $dudiAktif,
                     'jumlah_pendaftaran' => $jumlahPendaftaran,
                     'maksimal_pendaftaran' => 3,
                     'bisa_daftar' => $bisaDaftar,
-
-                    // Info magang aktif
                     'sudah_punya_magang_aktif' => $sudahPunyaMagangAktif,
                     'magang_aktif' => $sudahPunyaMagangAktif ? [
                         'id' => $magangAktif->id,
@@ -110,12 +147,11 @@ class DudiSiswaController extends Controller
                         'tanggal_mulai' => $magangAktif->tanggal_mulai,
                         'tanggal_selesai' => $magangAktif->tanggal_selesai,
                         'dudi' => [
+                            'id' => $magangAktif->dudi->id ?? null,
                             'nama_perusahaan' => $magangAktif->dudi->nama_perusahaan ?? 'Tidak diketahui',
-                            'bidang_usaha' => 'Perusahaan Mitra'
+                            'bidang_usaha' => $magangAktif->dudi->bidang_usaha ?? 'Perusahaan Mitra'
                         ]
                     ] : null,
-
-                    // ===== INFO MAGANG SELESAI (BARU) =====
                     'sudah_pernah_magang' => $sudahPernahMagang,
                     'magang_selesai' => $sudahPernahMagang ? [
                         'id' => $magangSelesai->id,
@@ -124,18 +160,21 @@ class DudiSiswaController extends Controller
                         'tanggal_selesai' => $magangSelesai->tanggal_selesai,
                         'nilai_akhir' => $magangSelesai->nilai_akhir,
                         'dudi' => [
+                            'id' => $magangSelesai->dudi->id ?? null,
                             'nama_perusahaan' => $magangSelesai->dudi->nama_perusahaan ?? 'Tidak diketahui',
-                            'bidang_usaha' => 'Perusahaan Mitra'
+                            'bidang_usaha' => $magangSelesai->dudi->bidang_usaha ?? 'Perusahaan Mitra'
                         ]
-                    ] : null
-                ],
-                'message' => $dudiAktif->isEmpty()
-                    ? 'Tidak ada DUDI aktif yang tersedia'
-                    : 'Data DUDI aktif berhasil diambil'
+                    ] : null,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'cached' => Cache::has($cacheKey),
             ]);
         } catch (\Exception $e) {
             Log::error('Error in getDudiAktif: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,
@@ -145,58 +184,180 @@ class DudiSiswaController extends Controller
         }
     }
 
+    /**
+     * Get fresh data tanpa cache
+     */
+    private function getFreshDudiData($siswa)
+    {
+        // Implementasi sama seperti di dalam cache, tapi tanpa cache
+        $magangSelesai = Magang::where('siswa_id', $siswa->id)
+            ->where('status', 'selesai')
+            ->with('dudi')
+            ->first();
+
+        $sudahPernahMagang = (bool) $magangSelesai;
+
+        $magangAktif = Magang::where('siswa_id', $siswa->id)
+            ->whereIn('status', ['diterima', 'berlangsung'])
+            ->with('dudi')
+            ->first();
+
+        $sudahPunyaMagangAktif = (bool) $magangAktif;
+
+        $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
+            ->whereIn('status', ['pending', 'diterima'])
+            ->count();
+
+        $bisaDaftar = !$sudahPernahMagang
+            && !$sudahPunyaMagangAktif
+            && $jumlahPendaftaran < 3;
+
+        $dudiAktif = Dudi::where('status', 'aktif')
+            ->withCount(['magang as kuota_terisi' => function ($query) {
+                $query->whereIn('status', ['diterima', 'berlangsung']);
+            }])
+            ->get()
+            ->map(function ($dudi) use ($siswa) {
+                $sudahDaftar = Magang::where('siswa_id', $siswa->id)
+                    ->where('dudi_id', $dudi->id)
+                    ->whereIn('status', ['pending', 'diterima', 'berlangsung'])
+                    ->exists();
+
+                $kuotaTotal = $dudi->kuota_magang ?? 10;
+                $kuotaTerisi = $dudi->kuota_terisi;
+                $kuotaTersisa = $kuotaTotal - $kuotaTerisi;
+
+                return [
+                    'id' => $dudi->id,
+                    'nama_perusahaan' => $dudi->nama_perusahaan,
+                    'alamat' => $dudi->alamat,
+                    'telepon' => $dudi->telepon,
+                    'email' => $dudi->email,
+                    'penanggung_jawab' => $dudi->penanggung_jawab,
+                    'website' => $dudi->website ?? null,
+                    'bidang_usaha' => $dudi->bidang_usaha ?? 'Perusahaan Mitra',
+                    'deskripsi' => $dudi->deskripsi ?? 'Perusahaan mitra magang siswa SMK Negeri 6 Malang',
+                    'kuota' => [
+                        'terisi' => $kuotaTerisi,
+                        'total' => $kuotaTotal,
+                        'tersisa' => $kuotaTersisa
+                    ],
+                    'fasilitas' => $dudi->fasilitas ? explode(',', $dudi->fasilitas) : [],
+                    'persyaratan' => $dudi->persyaratan ? explode(',', $dudi->persyaratan) : [],
+                    'sudah_daftar' => $sudahDaftar,
+                    'status_dudi' => $dudi->status,
+                    'last_updated' => now()->toDateTimeString()
+                ];
+            });
+
+        return [
+            'dudi_aktif' => $dudiAktif,
+            'jumlah_pendaftaran' => $jumlahPendaftaran,
+            'maksimal_pendaftaran' => 3,
+            'bisa_daftar' => $bisaDaftar,
+            'sudah_punya_magang_aktif' => $sudahPunyaMagangAktif,
+            'magang_aktif' => $sudahPunyaMagangAktif ? [
+                'id' => $magangAktif->id,
+                'status' => $magangAktif->status,
+                'tanggal_mulai' => $magangAktif->tanggal_mulai,
+                'tanggal_selesai' => $magangAktif->tanggal_selesai,
+                'dudi' => [
+                    'id' => $magangAktif->dudi->id ?? null,
+                    'nama_perusahaan' => $magangAktif->dudi->nama_perusahaan ?? 'Tidak diketahui',
+                    'bidang_usaha' => $magangAktif->dudi->bidang_usaha ?? 'Perusahaan Mitra'
+                ]
+            ] : null,
+            'sudah_pernah_magang' => $sudahPernahMagang,
+            'magang_selesai' => $sudahPernahMagang ? [
+                'id' => $magangSelesai->id,
+                'status' => $magangSelesai->status,
+                'tanggal_mulai' => $magangSelesai->tanggal_mulai,
+                'tanggal_selesai' => $magangSelesai->tanggal_selesai,
+                'nilai_akhir' => $magangSelesai->nilai_akhir,
+                'dudi' => [
+                    'id' => $magangSelesai->dudi->id ?? null,
+                    'nama_perusahaan' => $magangSelesai->dudi->nama_perusahaan ?? 'Tidak diketahui',
+                    'bidang_usaha' => $magangSelesai->dudi->bidang_usaha ?? 'Perusahaan Mitra'
+                ]
+            ] : null,
+            'cache_info' => [
+                'cached' => false,
+                'reason' => 'fresh_request'
+            ]
+        ];
+    }
+
     public function show($id)
     {
         try {
-            $dudi = Dudi::where('status', 'aktif')
-                ->withCount(['magang as kuota_terisi' => function ($query) {
-                    $query->whereIn('status', ['diterima', 'berlangsung']);
-                }])
-                ->find($id);
+            $user = Auth::user();
+            $studentId = $user->siswa ? $user->siswa->id : null;
 
-            if (!$dudi) {
+            $cacheKey = "dudi:detail:{$id}:student:{$studentId}";
+            $cacheDuration = 30;
+
+            $data = Cache::remember($cacheKey, $cacheDuration, function () use ($id, $user) {
+                $dudi = Dudi::where('status', 'aktif')
+                    ->withCount(['magang as kuota_terisi' => function ($query) {
+                        $query->whereIn('status', ['diterima', 'berlangsung']);
+                    }])
+                    ->find($id);
+
+                if (!$dudi) {
+                    return ['not_found' => true];
+                }
+
+                $siswa = $user->siswa;
+                $sudahDaftar = false;
+
+                if ($siswa) {
+                    $sudahDaftar = Magang::where('siswa_id', $siswa->id)
+                        ->where('dudi_id', $dudi->id)
+                        ->exists();
+                }
+
+                return [
+                    'id' => $dudi->id,
+                    'nama_perusahaan' => $dudi->nama_perusahaan,
+                    'alamat' => $dudi->alamat,
+                    'telepon' => $dudi->telepon,
+                    'email' => $dudi->email,
+                    'website' => $dudi->website,
+                    'bidang_usaha' => $dudi->bidang_usaha,
+                    'deskripsi' => $dudi->deskripsi,
+                    'kuota' => [
+                        'terisi' => $dudi->kuota_terisi,
+                        'total' => $dudi->kuota_magang,
+                        'tersisa' => $dudi->kuota_magang - $dudi->kuota_terisi
+                    ],
+                    'fasilitas' => $dudi->fasilitas ? explode(',', $dudi->fasilitas) : [],
+                    'persyaratan' => $dudi->persyaratan ? explode(',', $dudi->persyaratan) : [],
+                    'penanggung_jawab' => $dudi->penanggung_jawab,
+                    'sudah_daftar' => $sudahDaftar,
+                    'status_dudi' => $dudi->status,
+                    'last_updated' => now()->toDateTimeString()
+                ];
+            });
+
+            if (isset($data['not_found'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'DUDI tidak ditemukan atau tidak aktif'
                 ], 404);
             }
 
-            $user = Auth::user();
-            $siswa = $user->siswa;
-
-            // Cek apakah siswa sudah mendaftar ke DUDI ini
-            $sudahDaftar = false;
-            if ($siswa) {
-                $sudahDaftar = Magang::where('siswa_id', $siswa->id)
-                    ->where('dudi_id', $dudi->id)
-                    ->exists();
-            }
-
-            $data = [
-                'id' => $dudi->id,
-                'nama_perusahaan' => $dudi->nama_perusahaan,
-                'alamat' => $dudi->alamat,
-                'telepon' => $dudi->telepon,
-                'email' => $dudi->email,
-                'website' => $dudi->website,
-                'bidang_usaha' => $dudi->bidang_usaha,
-                'deskripsi' => $dudi->deskripsi,
-                'kuota' => [
-                    'terisi' => $dudi->kuota_terisi,
-                    'total' => $dudi->kuota_magang,
-                    'tersisa' => $dudi->kuota_magang - $dudi->kuota_terisi
-                ],
-                'fasilitas' => $dudi->fasilitas ? explode(',', $dudi->fasilitas) : [],
-                'persyaratan' => $dudi->persyaratan ? explode(',', $dudi->persyaratan) : [],
-                'penanggung_jawab' => $dudi->penanggung_jawab,
-                'sudah_daftar' => $sudahDaftar,
-                'status_dudi' => $dudi->status
+            $data['cache_info'] = [
+                'cached' => Cache::has($cacheKey),
+                'duration' => $cacheDuration,
+                'expires_at' => now()->addSeconds($cacheDuration)->toDateTimeString()
             ];
 
             return response()->json([
                 'success' => true,
                 'data' => $data,
-                'message' => 'Detail DUDI berhasil diambil'
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration,
+                'realtime_channel' => "dudi.{$id}"
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -220,7 +381,7 @@ class DudiSiswaController extends Controller
                 ], 404);
             }
 
-            // ===== VALIDASI 1: CEK SUDAH PERNAH MAGANG SELESAI (PRIORITAS TERTINGGI) =====
+            // ===== VALIDASI (kode validasi Anda tetap sama) =====
             $sudahPernahMagang = Magang::where('siswa_id', $siswa->id)
                 ->where('status', 'selesai')
                 ->exists();
@@ -228,50 +389,43 @@ class DudiSiswaController extends Controller
             if ($sudahPernahMagang) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Anda sudah pernah menyelesaikan magang dan tidak dapat mendaftar lagi. Setiap siswa hanya diperbolehkan magang satu kali.'
-                ], 403); // 403 Forbidden
+                    'message' => 'Anda sudah pernah menyelesaikan magang'
+                ], 403);
             }
 
-            // ===== VALIDASI 2: CEK DUDI AKTIF =====
             $dudi = Dudi::where('status', 'aktif')->find($dudi_id);
-
             if (!$dudi) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'DUDI tidak ditemukan atau tidak aktif'
+                    'message' => 'DUDI tidak ditemukan'
                 ], 404);
             }
 
-            // ===== VALIDASI 3: CEK KUOTA DUDI =====
             $kuotaTerisi = Magang::where('dudi_id', $dudi_id)
-                ->whereIn('status', [Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
+                ->whereIn('status', ['diterima', 'berlangsung'])
                 ->count();
 
-            $kuotaTotal = 10; // Default kuota
-
-            if ($kuotaTerisi >= $kuotaTotal) {
+            if ($kuotaTerisi >= ($dudi->kuota_magang ?? 10)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Kuota magang di DUDI ini sudah penuh'
+                    'message' => 'Kuota magang sudah penuh'
                 ], 400);
             }
 
-            // ===== VALIDASI 4: CEK MAGANG AKTIF =====
             $magangAktif = Magang::where('siswa_id', $siswa->id)
-                ->whereIn('status', [Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
+                ->whereIn('status', ['diterima', 'berlangsung'])
                 ->first();
 
             if ($magangAktif) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Anda sudah memiliki magang aktif di ' . ($magangAktif->dudi->nama_perusahaan ?? 'perusahaan lain')
+                    'message' => 'Anda sudah memiliki magang aktif'
                 ], 400);
             }
 
-            // ===== VALIDASI 5: CEK SUDAH DAFTAR KE DUDI INI =====
             $sudahDaftar = Magang::where('siswa_id', $siswa->id)
                 ->where('dudi_id', $dudi_id)
-                ->whereIn('status', [Magang::STATUS_PENDING, Magang::STATUS_DITERIMA, Magang::STATUS_BERLANGSUNG])
+                ->whereIn('status', ['pending', 'diterima', 'berlangsung'])
                 ->exists();
 
             if ($sudahDaftar) {
@@ -281,40 +435,53 @@ class DudiSiswaController extends Controller
                 ], 400);
             }
 
-            // ===== VALIDASI 6: CEK BATAS MAKSIMAL PENDAFTARAN =====
             $jumlahPendaftaran = Magang::where('siswa_id', $siswa->id)
-                ->whereIn('status', [Magang::STATUS_PENDING, Magang::STATUS_DITERIMA])
+                ->whereIn('status', ['pending', 'diterima'])
                 ->count();
 
             if ($jumlahPendaftaran >= 3) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Anda sudah mencapai batas maksimal pendaftaran (3 DUDI)'
+                    'message' => 'Sudah mencapai batas maksimal pendaftaran'
                 ], 400);
             }
 
-            // ===== SEMUA VALIDASI LOLOS, BUAT PENDAFTARAN =====
+            // ===== BUAT PENDAFTARAN =====
             $magang = Magang::create([
                 'siswa_id' => $siswa->id,
                 'dudi_id' => $dudi_id,
-                'guru_id' => null, // Akan di-assign nanti
-                'status' => Magang::STATUS_PENDING,
+                'guru_id' => null,
+                'status' => 'pending',
                 'nilai_akhir' => null,
                 'tanggal_mulai' => null,
                 'tanggal_selesai' => null,
             ]);
 
-            // Refresh model
-            $magang->refresh();
+            // ✅ Load relasi lengkap
+            $magang->load(['dudi', 'siswa.user']);
 
-            // Log aktivitas
-            Log::info('Pendaftaran magang baru', [
-                'siswa_id' => $siswa->id,
-                'dudi_id' => $dudi_id,
-                'magang_id' => $magang->id,
-                'nama_siswa' => $siswa->nama ?? $user->name,
-                'nama_dudi' => $dudi->nama_perusahaan
-            ]);
+            // Clear cache
+            $this->clearDudiCache($siswa->id);
+
+            // ========== BROADCAST EVENT ==========
+            try {
+                // ✅ Cari semua guru dan admin
+                $targetUsers = User::whereHas('roles', function ($query) {
+                    $query->whereIn('name', ['guru', 'admin']);
+                })->pluck('id')->toArray();
+
+                // ✅ Dispatch event
+                event(new DudiCreated($magang, $targetUsers));
+
+                Log::info('MagangCreated event broadcasted', [
+                    'magang_id' => $magang->id,
+                    'siswa_id' => $siswa->id,
+                    'dudi_id' => $dudi_id,
+                    'total_recipients' => count($targetUsers)
+                ]);
+            } catch (\Exception $broadcastError) {
+                Log::error('Broadcast failed: ' . $broadcastError->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
@@ -325,27 +492,93 @@ class DudiSiswaController extends Controller
                     'status' => $magang->status,
                     'tanggal_daftar' => $magang->created_at->format('Y-m-d H:i:s'),
                     'dudi' => [
+                        'id' => $dudi->id,
                         'nama_perusahaan' => $dudi->nama_perusahaan,
                         'bidang_usaha' => $dudi->bidang_usaha ?? 'Perusahaan Mitra',
-                        'alamat' => $dudi->alamat,
-                        'penanggung_jawab' => $dudi->penanggung_jawab
-                    ]
+                    ],
                 ],
-                'message' => 'Pendaftaran magang berhasil dikirim. Menunggu verifikasi dari perusahaan.'
-            ], 201); // 201 Created
-
+                'message' => 'Pendaftaran berhasil dikirim',
+            ], 201);
         } catch (\Exception $e) {
-            Log::error('Error in store magang: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-            Log::error('Request data: ' . json_encode([
-                'dudi_id' => $dudi_id,
-                'user_id' => Auth::id()
-            ]));
+            Log::error('Error in store: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengirim pendaftaran',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+
+
+    /**
+     * Get fresh data tanpa cache
+     */
+    public function getDudiAktifFresh(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            $siswa = $user->siswa;
+
+            if (!$siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data siswa tidak ditemukan'
+                ], 404);
+            }
+
+            $data = $this->getFreshDudiData($siswa);
+            $data['cache_info'] = ['cached' => false, 'reason' => 'fresh_request'];
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'cached' => false,
+                'timestamp' => now()->toDateTimeString(),
+                'realtime_available' => true
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in getDudiAktifFresh: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Clear cache untuk DUDI siswa
+     */
+    public function clearDudiCacheEndpoint(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            $siswa = $user->siswa;
+            $studentId = $siswa ? $siswa->id : null;
+            $clearAll = $request->get('all', false);
+
+            if ($clearAll) {
+                $this->clearDudiCache();
+                $message = 'All DUDI cache cleared successfully';
+            } else {
+                $this->clearDudiCache($studentId);
+                $message = 'User DUDI cache cleared successfully';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'user_id' => Auth::id(),
+                'student_id' => $studentId,
+                'clear_all' => $clearAll,
+                'timestamp' => now()->toDateTimeString()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to clear cache: ' . $e->getMessage()
             ], 500);
         }
     }
