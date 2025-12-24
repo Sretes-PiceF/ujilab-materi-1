@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\BatchController;
 use App\Http\Controllers\Api\DudiSiswa;
 use App\Http\Controllers\Api\LogbookController;
+use App\Http\Controllers\Api\LogbookSiswa;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DudiGuruController;
@@ -44,11 +45,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/magang/status', [LogbookSiswaController::class, 'getStatusMagang']);
         //Logbook SIswa
         Route::prefix('siswa')->group(function () {
+            //Route Siswa
+            Route::get('/logbook/batch', [LogbookSiswa::class, 'getLogbookData']);
+            Route::get('/logbook/batch/fresh', [LogbookSiswa::class, 'getFreshData']);
+            Route::post('/logbook/batch/clear-cache', [LogbookSiswa::class, 'clearCache']);
+
             Route::get('/logbook', [LogbookSiswaController::class, 'index']);
             Route::get('/logbook/id', [LogbookSiswaController::class, 'show']);
             Route::post('/logbook/create', [LogbookSiswaController::class, 'store']);
             Route::post('/logbook/update/{id}', [LogbookSiswaController::class, 'update']);
             Route::delete('/logbook/delete/{id}', [LogbookSiswaController::class, 'destroy']);
+
 
             //Route DUdi
             Route::get('dudi/aktif', [DudiSiswaController::class, 'getDudiAktif']);

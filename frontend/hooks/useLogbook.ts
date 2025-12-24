@@ -1,7 +1,8 @@
+// hooks/useLogbook.ts
 'use client';
 
-import { useState } from 'react';
-import useSWR from 'swr';
+import { useState, useCallback } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
 import api from '@/lib/axios';
 
 // ============= TYPES =============
@@ -12,11 +13,15 @@ export interface Siswa {
   kelas: string;
   jurusan: string;
   email: string;
+  telepon?: string;
 }
 
 export interface Dudi {
   id: number;
   nama_perusahaan: string;
+  alamat?: string;
+  telepon?: string;
+  email?: string;
 }
 
 export interface LogbookEntry {
@@ -51,7 +56,10 @@ export interface LogbookStats {
 interface BatchLogbookData {
   stats: LogbookStats;
   logbook_list: LogbookEntry[];
+  siswa_list: Siswa[];
+  dudi_list: Dudi[];
   timestamp: string;
+  version: string;
 }
 
 interface CreateLogbookData {
@@ -63,11 +71,16 @@ interface CreateLogbookData {
 }
 
 interface UpdateLogbookData {
-  kegiatan: string;
-  kendala: string;
+  kegiatan?: string;
+  kendala?: string;
   file?: File;
   remove_file?: boolean;
-  status_verifikasi?: string;
+  status_verifikasi?: 'pending' | 'disetujui' | 'ditolak';
+  catatan_guru?: string;
+}
+
+interface VerifikasiLogbookData {
+  status_verifikasi: 'disetujui' | 'ditolak';
   catatan_guru?: string;
 }
 
@@ -80,106 +93,100 @@ interface ApiResponse<T> {
   cache_ttl?: number;
 }
 
-// ============= FETCHER =============
-const fetcher = (url: string) => api.get(url).then(res => res.data);
+const fetcher = async (url: string) => {
+  const response = await api.get(url);
+  return response.data;
+};
+
+const defaultStats: LogbookStats = {
+  total_logbook: 0,
+  belum_diverifikasi: 0,
+  disetujui: 0,
+  ditolak: 0,
+};
 
 // ============= BATCH HOOK (MAIN HOOK) =============
-/**
- * Hook utama untuk fetch SEMUA data logbook dalam 1 request
- * Menggantikan multiple requests jadi 1
- */
-export function useLogbookBatch() {
-  const { data, error, mutate, isLoading } = useSWR<ApiResponse<BatchLogbookData>>(
+export function useLogbookBatch(options?: {
+  realTime?: boolean;
+  pollingInterval?: number;
+}) {
+  const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
+  
+  const realTime = options?.realTime ?? true;
+  const pollingInterval = options?.pollingInterval ?? 3000;
+
+  const { data, error, mutate, isLoading, isValidating } = useSWR<ApiResponse<BatchLogbookData>>(
     '/guru/logbook/batch',
     fetcher,
     {
       revalidateOnFocus: false,
-      dedupingInterval: 5000, // Cache 5 detik
-      revalidateOnMount: true,
+      revalidateOnReconnect: true,
+      dedupingInterval: 2000,
+      refreshInterval: realTime ? pollingInterval : 0,
+      focusThrottleInterval: 10000,
+      errorRetryCount: 1,
+      errorRetryInterval: 3000,
+      keepPreviousData: true,
+      revalidateIfStale: false,
     }
   );
 
+  const refresh = useCallback(async () => {
+    await mutate();
+  }, [mutate]);
+
+  const forceRefresh = useCallback(async () => {
+    setDeletedIds(new Set());
+    await mutate(undefined, { revalidate: true });
+  }, [mutate]);
+
+  const markAsDeleted = useCallback((id: number) => {
+    setDeletedIds(prev => new Set([...prev, id]));
+  }, []);
+
+  const clearDeletedIds = useCallback(() => {
+    setDeletedIds(new Set());
+  }, []);
+
+  const filteredLogbook = useCallback(() => {
+    return (data?.data?.logbook_list || []).filter(
+      (item: LogbookEntry) => !deletedIds.has(item.id)
+    );
+  }, [data?.data?.logbook_list, deletedIds]);
+
   return {
-    // Stats
-    stats: data?.data?.stats || {
-      total_logbook: 0,
-      belum_diverifikasi: 0,
-      disetujui: 0,
-      ditolak: 0,
-    },
-    
-    // Logbook List
-    logbook: data?.data?.logbook_list || [],
-    
-    // Meta
+    stats: data?.data?.stats || defaultStats,
+    logbook: filteredLogbook(),
+    siswa: data?.data?.siswa_list || [],
+    dudi: data?.data?.dudi_list || [],
     isLoading,
+    isValidating,
     error,
     isCached: data?.cached || false,
     timestamp: data?.data?.timestamp || null,
-    
-    // Actions
-    refresh: mutate,
-  };
-}
-
-// ============= INDIVIDUAL HOOKS (Fallback) =============
-/**
- * Hook untuk fetch logbook list saja
- * Gunakan ini kalau tidak butuh stats
- */
-export function useLogbook() {
-  const { data, error, mutate, isLoading } = useSWR<ApiResponse<LogbookEntry[]>>(
-    '/guru/logbook',
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      dedupingInterval: 5000,
-    }
-  );
-
-  return {
-    logbook: data?.data || [],
-    isLoading,
-    error,
-    refresh: mutate,
-  };
-}
-
-/**
- * Hook untuk fetch stats saja
- */
-export function useLogbookStats() {
-  const { data, error, mutate, isLoading } = useSWR<ApiResponse<LogbookStats>>(
-    '/logbook',
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      dedupingInterval: 10000,
-    }
-  );
-
-  return {
-    stats: data?.data || {
-      total_logbook: 0,
-      belum_diverifikasi: 0,
-      disetujui: 0,
-      ditolak: 0,
-    },
-    isLoading,
-    error,
-    refresh: mutate,
+    version: data?.data?.version || '1.0',
+    refresh,
+    forceRefresh,
+    markAsDeleted,
+    clearDeletedIds,
   };
 }
 
 // ============= MUTATIONS HOOK =============
-/**
- * Hook untuk CRUD operations
- */
 export function useLogbookMutations() {
   const [loading, setLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+  const { mutate } = useSWRConfig();
 
-  const createLogbook = async (data: CreateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+  const handleError = useCallback((error: any): never => {
+    if (error.response?.status === 422) {
+      setValidationErrors(error.response.data.errors || {});
+      throw new Error(error.response.data.message || 'Validasi gagal');
+    }
+    throw new Error(error.response?.data?.message || 'Terjadi kesalahan');
+  }, []);
+
+  const createLogbook = useCallback(async (data: CreateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
     setLoading(true);
     setValidationErrors({});
 
@@ -202,45 +209,32 @@ export function useLogbookMutations() {
           },
         }
       );
+      
+      await mutate('/guru/logbook/batch');
       return response.data;
     } catch (error: any) {
-      if (error.response?.status === 422) {
-        setValidationErrors(error.response.data.errors || {});
-        throw new Error(error.response.data.message || 'Validasi gagal');
-      }
-      throw new Error(error.response?.data?.message || 'Gagal membuat logbook');
+      return handleError(error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [mutate, handleError]);
 
-  const updateLogbook = async (id: number, data: UpdateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+  const updateLogbook = useCallback(async (id: number, data: UpdateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
     setLoading(true);
     setValidationErrors({});
 
     try {
       const formData = new FormData();
-      formData.append('kegiatan', data.kegiatan);
-      formData.append('kendala', data.kendala);
       
-      if (data.file) {
-        formData.append('file', data.file);
-      }
-      
-      if (data.remove_file) {
-        formData.append('remove_file', '1');
-      }
-      
-      if (data.status_verifikasi) {
-        formData.append('status_verifikasi', data.status_verifikasi);
-      }
-      
-      if (data.catatan_guru) {
-        formData.append('catatan_guru', data.catatan_guru);
-      }
+      if (data.kegiatan) formData.append('kegiatan', data.kegiatan);
+      if (data.kendala) formData.append('kendala', data.kendala);
+      if (data.file) formData.append('file', data.file);
+      if (data.remove_file) formData.append('remove_file', '1');
+      if (data.status_verifikasi) formData.append('status_verifikasi', data.status_verifikasi);
+      if (data.catatan_guru) formData.append('catatan_guru', data.catatan_guru);
 
       const response = await api.post<ApiResponse<LogbookEntry>>(
-        `/logbook/update/${id}`,
+        `/guru/logbook/update/${id}`,
         formData,
         {
           headers: {
@@ -248,36 +242,17 @@ export function useLogbookMutations() {
           },
         }
       );
+      
+      await mutate('/guru/logbook/batch');
       return response.data;
     } catch (error: any) {
-      if (error.response?.status === 422) {
-        setValidationErrors(error.response.data.errors || {});
-        throw new Error(error.response.data.message || 'Validasi gagal');
-      }
-      throw new Error(error.response?.data?.message || 'Gagal mengupdate logbook');
+      return handleError(error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [mutate, handleError]);
 
-  const deleteLogbook = async (id: number): Promise<ApiResponse<null>> => {
-    setLoading(true);
-    setValidationErrors({});
-
-    try {
-      const response = await api.delete<ApiResponse<null>>(`/logbook/delete/${id}`);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Gagal menghapus logbook');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const verifikasiLogbook = async (
-    id: number,
-    data: { status_verifikasi: string; catatan_guru?: string }
-  ): Promise<ApiResponse<LogbookEntry>> => {
+  const verifikasiLogbook = useCallback(async (id: number, data: VerifikasiLogbookData): Promise<ApiResponse<LogbookEntry>> => {
     setLoading(true);
     setValidationErrors({});
 
@@ -286,25 +261,49 @@ export function useLogbookMutations() {
         `/logbook/${id}/verifikasi`,
         data
       );
+      
+      await mutate('/guru/logbook/batch');
       return response.data;
     } catch (error: any) {
-      if (error.response?.status === 422) {
-        setValidationErrors(error.response.data.errors || {});
-        throw new Error(error.response.data.message || 'Validasi gagal');
-      }
-      throw new Error(error.response?.data?.message || 'Gagal memverifikasi logbook');
+      return handleError(error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [mutate, handleError]);
+
+  const deleteLogbook = useCallback(async (id: number): Promise<ApiResponse<null>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const response = await api.delete<ApiResponse<null>>(`/guru/logbook/delete/${id}`);
+      await mutate('/guru/logbook/batch');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Gagal menghapus logbook');
+    } finally {
+      setLoading(false);
+    }
+  }, [mutate]);
+
+  const clearCache = useCallback(async (): Promise<ApiResponse<null>> => {
+    try {
+      const response = await api.post<ApiResponse<null>>('/guru/logbook/batch/clear-cache');
+      await mutate('/guru/logbook/batch', undefined, { revalidate: true });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Gagal membersihkan cache');
+    }
+  }, [mutate]);
 
   return {
     createLogbook,
     updateLogbook,
-    deleteLogbook,
     verifikasiLogbook,
+    deleteLogbook,
+    clearCache,
     loading,
     validationErrors,
-    clearErrors: () => setValidationErrors({}),
+    clearErrors: useCallback(() => setValidationErrors({}), []),
   };
 }

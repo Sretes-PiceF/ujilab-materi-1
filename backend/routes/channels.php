@@ -25,3 +25,31 @@ Broadcast::channel('user.{id}', function ($user, $id) {
 Broadcast::channel('magang', function () {
     return true;
 });
+
+Broadcast::channel('logbook', function () {
+    return true;
+});
+
+
+// ✅ TAMBAHKAN CHANNEL UNTUK SISWA LOGBOOK
+Broadcast::channel('siswa.logbook.{siswaId}', function ($user, $siswaId) {
+    // Hanya siswa yang bersangkutan yang bisa listen channel-nya
+    return $user->siswa && (int) $user->siswa->id === (int) $siswaId;
+});
+
+Broadcast::channel('siswa.user.{userId}', function ($user, $userId) {
+    // Hanya user yang bersangkutan yang bisa listen
+    return (int) $user->id === (int) $userId;
+});
+
+// Channel untuk notifikasi global siswa
+Broadcast::channel('siswa.notifications', function ($user) {
+    // Hanya user dengan role siswa yang bisa listen
+    return $user->hasRole('siswa');
+});
+
+// Channel untuk semua logbook siswa (jika perlu monitoring)
+Broadcast::channel('logbook.siswa.all', function ($user) {
+    // Admin dan guru bisa monitor semua logbook siswa
+    return $user->hasAnyRole(['admin', 'guru']);
+});

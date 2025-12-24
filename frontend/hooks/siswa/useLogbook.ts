@@ -1,531 +1,377 @@
-// hooks/useLogbook.ts
-import { useState, useEffect } from 'react';
+// hooks/siswa/useLogbook.ts
+'use client';
 
-export interface LogbookData {
-    id: number;
-    magang_id: number;
-    tanggal: string;
-    tanggal_formatted: string;
-    kegiatan: string;
-    kendala: string;
-    file: string | null;
-    file_url: string | null
-    status_verifikasi: 'pending' | 'disetujui' | 'ditolak';
-    catatan_guru: string | null;
-    catatan_dudi: string | null;
-    dudi: {
-        id: number | null;
-        nama_perusahaan: string | null;
-    };
-    created_at: string;
-    updated_at: string;
+import { useState, useCallback } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
+import api from '@/lib/axios';
+
+// ============= TYPES =============
+export interface Dudi {
+  id: number;
+  nama_perusahaan: string;
+  alamat?: string;
+  telepon?: string;
+  email?: string;
 }
 
-interface LogbookResponse {
-    success: boolean;
-    data: LogbookData[];
-    meta?: {
-        current_page: number;
-        last_page: number;
-        per_page: number;
-        total: number;
-        from: number;
-        to: number;
+export interface LogbookEntry {
+  id: number;
+  magang_id: number;
+  tanggal: string;
+  tanggal_formatted: string;
+  kegiatan: string;
+  kendala: string;
+  file: string | null;
+  file_url?: string | null;
+  webp_image_url?: string | null;
+  thumbnail_url?: string | null;
+  status_verifikasi: 'pending' | 'disetujui' | 'ditolak';
+  original_image?: string;
+  webp_image?: string;
+  webp_thumbnail?: string;
+  original_size?: number;
+  optimized_size?: number;
+  catatan_guru: string | null;
+  catatan_dudi: string | null;
+  dudi: Dudi;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BatchLogbookData {
+  logbook_list: LogbookEntry[];
+  dudi_list: Dudi[];
+  magang_info: {
+    status: string;
+    tanggal_mulai: string;
+    tanggal_selesai: string;
+    dudi?: {
+      id: number;
+      nama_perusahaan: string;
     };
-    message?: string;
+  };
+  siswa_info?: {
+    id: number;
+    nama: string;
+    nis: string;
+    kelas: string;
+    jurusan: string;
+  };
+  meta?: {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    from: number | null;
+    to: number | null;
+  };
+  timestamp: string;
+  version: string;
 }
 
 interface CreateLogbookData {
-    tanggal: string;
-    kegiatan: string;
-    kendala: string;
-    file?: File;
+  tanggal: string;
+  kegiatan: string;
+  kendala: string;
+  file?: File;
 }
- 
-// Base URL untuk API Laravel
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-// Helper function untuk mendapatkan token dari cookies
-const getAuthToken = (): string | null => {
-    if (typeof document !== 'undefined') {
-        // Mengambil token dari cookies
-        const cookies = document.cookie.split(';');
-        const tokenCookie = cookies.find(cookie => cookie.trim().startsWith('access_token='));
-        if (tokenCookie) {
-            return tokenCookie.split('=')[1];
-        }
-    }
-    return null;
-};
+interface UpdateLogbookData {
+  tanggal?: string;
+  kegiatan?: string;
+  kendala?: string;
+  file?: File;
+  remove_file?: boolean;
+}
 
-// Helper function untuk mendapatkan headers
-const getHeaders = (contentType: string = 'application/json'): HeadersInit => {
-    const token = getAuthToken();
-    const headers: HeadersInit = {
-        'Accept': 'application/json',
-        "ngrok-skip-browser-warning": "true",
-    };
+interface ApiResponse<T> {
+  success: boolean;
+  message?: string;
+  data?: T;
+  errors?: Record<string, string[]>;
+  cached?: boolean;
+  cache_ttl?: number;
+}
 
-    // Only add Content-Type if it's not FormData
-    if (contentType !== 'multipart/form-data') {
-        headers['Content-Type'] = contentType;
-    }
-
-    // Add Authorization header if token exists
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    // Add X-Requested-With header for Laravel
-    headers['X-Requested-With'] = 'XMLHttpRequest';
-
-    return headers;
-};
-
-export const useLogbook = () => {
-    const [logbooks, setLogbooks] = useState<LogbookData[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [pagination, setPagination] = useState({
-        current_page: 1,
-        last_page: 1,
-        per_page: 10,
-        total: 0,
-        from: 0,
-        to: 0
+// Fetcher yang lebih robust
+const fetcher = async (url: string) => {
+  try {
+    const response = await api.get(url);
+    
+    // Debug log
+    console.log('API Response:', {
+      url,
+      status: response.status,
+      data: response.data
     });
-
-    // Debug function
-    const debugResponse = async (response: Response, context: string) => {
-        console.group(`🔍 DEBUG RESPONSE - ${context}`);
-        console.log('URL:', response.url);
-        console.log('Status:', response.status, response.statusText);
-        console.log('Headers:', Object.fromEntries(response.headers.entries()));
-        
-        const responseText = await response.text();
-        console.log('Raw Response:', responseText);
-        
-        try {
-            const jsonData = JSON.parse(responseText);
-            console.log('Parsed JSON:', jsonData);
-        } catch (e) {
-            console.log('❌ JSON Parse Error:', e);
-            console.log('Response is not valid JSON');
-        }
-        console.groupEnd();
-        
-        // Return the text for further processing
-        return responseText;
-    };
-
-    // Check authentication status
-    const checkAuth = (): boolean => {
-        const token = getAuthToken();
-        console.log('🔐 Auth Check - Token:', token ? '✅ Available' : '❌ Missing');
-        
-        if (!token) {
-            setError('Anda belum login. Silakan login terlebih dahulu.');
-            return false;
-        }
-        return true;
-    };
-
-    // Handle unauthorized response
-    const handleUnauthorized = () => {
-        setError('Sesi Anda telah berakhir. Silakan login kembali.');
-        // Redirect to login page
-        if (typeof window !== 'undefined') {
-            window.location.href = '/';
-        }
-    };
-
-    // Fetch logbooks
-    const fetchLogbooks = async (page = 1, perPage = 10, search = '', status = 'all') => {
-        // Check authentication first
-        if (!checkAuth()) {
-            setLoading(false);
-            return;
-        }
-
-        setLoading(true);
-        setError(null);
-        
-        try {
-            console.group('🔄 FETCH LOGBOOKS');
-            console.log('Params:', { page, perPage, search, status });
-
-            const token = getAuthToken();
-            console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
-            console.log('Cookies:', document.cookie);
-
-            const params = new URLSearchParams({
-                page: page.toString(),
-                per_page: perPage.toString(),
-                ...(search && { search }),
-                ...(status !== 'all' && { status })
-            });
-
-            const apiUrl = `${API_BASE_URL}/siswa/logbook?${params}`;
-            console.log('API URL:', apiUrl);
-
-            const response = await fetch(apiUrl, {
-                headers: getHeaders(),
-                credentials: 'include' // Important for cookies
-                
-            });
-
-            // Debug the response
-            const responseText = await debugResponse(response, 'FETCH LOGBOOKS');
-
-            if (response.status === 401) {
-                handleUnauthorized();
-                return;
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            let data: LogbookResponse;
-            try {
-                data = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('JSON Parse Error:', parseError);
-                throw new Error('Response is not valid JSON');
-            }
-            
-            if (data.success) {
-                console.log('✅ Data fetched successfully:', data.data);
-                setLogbooks(data.data);
-                if (data.meta) {
-                    setPagination(data.meta);
-                }
-            } else {
-                console.error('❌ API returned error:', data.message);
-                throw new Error(data.message || 'Gagal mengambil data logbook');
-            }
-        } catch (err) {
-            console.error('❌ Fetch error:', err);
-            const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan';
-            setError(errorMessage);
-        } finally {
-            setLoading(false);
-            console.groupEnd();
-        }
-    };
-
-    // Create logbook
-    const createLogbook = async (logbookData: CreateLogbookData): Promise<{success: boolean; message: string; data?: LogbookData}> => {
-        // Check authentication first
-        if (!checkAuth()) {
-            return {
-                success: false,
-                message: 'Anda belum login. Silakan login terlebih dahulu.'
-            };
-        }
-
-        try {
-            console.group('🔄 CREATE LOGBOOK');
-            console.log('Logbook data:', logbookData);
-
-            const token = getAuthToken();
-            console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
-
-            const formData = new FormData();
-            formData.append('tanggal', logbookData.tanggal);
-            formData.append('kegiatan', logbookData.kegiatan);
-            formData.append('kendala', logbookData.kendala);
-            
-            if (logbookData.file) {
-                formData.append('file', logbookData.file);
-                console.log('File attached:', logbookData.file.name);
-            }
-
-            const response = await fetch(`${API_BASE_URL}/siswa/logbook/create`, {
-                method: 'POST',
-                headers: getHeaders('multipart/form-data'),
-                body: formData,
-                credentials: 'include'
-            });
-
-            // Debug the response
-            const responseText = await debugResponse(response, 'CREATE LOGBOOK');
-
-            if (response.status === 401) {
-                handleUnauthorized();
-                return {
-                    success: false,
-                    message: 'Sesi telah berakhir'
-                };
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('JSON Parse Error:', parseError);
-                return {
-                    success: false,
-                    message: 'Response is not valid JSON'
-                };
-            }
-            
-            console.log('Create result:', result);
-            
-            if (result.success) {
-                console.log('✅ Logbook created successfully');
-                await fetchLogbooks();
-            } else {
-                console.error('❌ Create failed:', result.message);
-            }
-            
-            return result;
-        } catch (err) {
-            console.error('❌ Create error:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan saat membuat logbook'
-            };
-        } finally {
-            console.groupEnd();
-        }
-    };
-
-    // Update logbook
-    const updateLogbook = async (id: number, logbookData: Partial<CreateLogbookData>): Promise<{success: boolean; message: string}> => {
-        // Check authentication first
-        if (!checkAuth()) {
-            return {
-                success: false,
-                message: 'Anda belum login. Silakan login terlebih dahulu.'
-            };
-        }
-
-        try {
-            console.group('🔄 UPDATE LOGBOOK');
-            console.log('Update data:', { id, logbookData });
-
-            const token = getAuthToken();
-            console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
-
-            const formData = new FormData();
-            if (logbookData.tanggal) formData.append('tanggal', logbookData.tanggal);
-            if (logbookData.kegiatan) formData.append('kegiatan', logbookData.kegiatan);
-            if (logbookData.kendala) formData.append('kendala', logbookData.kendala);
-            
-            if (logbookData.file) {
-                formData.append('file', logbookData.file);
-            }
-
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL;
-
-            const response = await fetch(`${baseUrl}/api/logbook/update/${id}`, {
-                method: 'PATCH',
-                headers: getHeaders('multipart/form-data'),
-                body: formData,
-                credentials: 'include'
-            });
-
-            // Debug the response
-            const responseText = await debugResponse(response, 'UPDATE LOGBOOK');
-
-            if (response.status === 401) {
-                handleUnauthorized();
-                return {
-                    success: false,
-                    message: 'Sesi telah berakhir'
-                };
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('JSON Parse Error:', parseError);
-                return {
-                    success: false,
-                    message: 'Response is not valid JSON'
-                };
-            }
-            
-            console.log('Update result:', result);
-            
-            if (result.success) {
-                console.log('✅ Logbook updated successfully');
-                await fetchLogbooks();
-            }
-            
-            return result;
-        } catch (err) {
-            console.error('❌ Update error:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan saat mengupdate logbook'
-            };
-        } finally {
-            console.groupEnd();
-        }
-    };
-
-    // Delete logbook
-    const deleteLogbook = async (id: number): Promise<{success: boolean; message: string}> => {
-        // Check authentication first
-        if (!checkAuth()) {
-            return {
-                success: false,
-                message: 'Anda belum login. Silakan login terlebih dahulu.'
-            };
-        }
-
-        try {
-            console.group('🔄 DELETE LOGBOOK');
-            console.log('Delete ID:', id);
-
-            const token = getAuthToken();
-            console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
-
-            const response = await fetch(`${API_BASE_URL}/siswa/logbook/delete/${id}`, {
-                method: 'DELETE',
-                headers: getHeaders(),
-                credentials: 'include'
-            });
-
-            // Debug the response
-            const responseText = await debugResponse(response, 'DELETE LOGBOOK');
-
-            if (response.status === 401) {
-                handleUnauthorized();
-                return {
-                    success: false,
-                    message: 'Sesi telah berakhir'
-                };
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('JSON Parse Error:', parseError);
-                return {
-                    success: false,
-                    message: 'Response is not valid JSON'
-                };
-            }
-            
-            console.log('Delete result:', result);
-            
-            if (result.success) {
-                console.log('✅ Logbook deleted successfully');
-                await fetchLogbooks();
-            }
-            
-            return result;
-        } catch (err) {
-            console.error('❌ Delete error:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan saat menghapus logbook'
-            };
-        } finally {
-            console.groupEnd();
-        }
-    };
-
-    // Get logbook detail
-    const getLogbookDetail = async (id: number): Promise<{success: boolean; data?: LogbookData; message?: string}> => {
-        // Check authentication first
-        if (!checkAuth()) {
-            return {
-                success: false,
-                message: 'Anda belum login. Silakan login terlebih dahulu.'
-            };
-        }
-
-        try {
-            console.group('🔄 GET LOGBOOK DETAIL');
-            console.log('Logbook ID:', id);
-
-            const token = getAuthToken();
-            console.log('Auth Token:', token ? '✅ Available' : '❌ Missing');
-
-            const response = await fetch(`${API_BASE_URL}/api/siswa/logbook/${id}`, {
-                headers: getHeaders(),
-                credentials: 'include'
-            });
-
-            // Debug the response
-            const responseText = await debugResponse(response, 'GET LOGBOOK DETAIL');
-
-            if (response.status === 401) {
-                handleUnauthorized();
-                return {
-                    success: false,
-                    message: 'Sesi telah berakhir'
-                };
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('JSON Parse Error:', parseError);
-                return {
-                    success: false,
-                    message: 'Response is not valid JSON'
-                };
-            }
-            
-            console.log('Detail result:', result);
-            return result;
-        } catch (err) {
-            console.error('❌ Get detail error:', err);
-            return {
-                success: false,
-                message: err instanceof Error ? err.message : 'Terjadi kesalahan saat mengambil detail logbook'
-            };
-        } finally {
-            console.groupEnd();
-        }
-    };
-
-    // Clear error
-    const clearError = () => {
-        setError(null);
-    };
-
-    useEffect(() => {
-        console.log('🎯 useLogbook hook mounted, fetching initial data...');
-        console.log('Initial Auth Token:', getAuthToken() ? '✅ Available' : '❌ Missing');
-        console.log('All Cookies:', document.cookie);
-        fetchLogbooks();
-    }, []);
-
+    
+    // Jika backend mengembalikan success: false
+    if (response.data?.success === false) {
+      return {
+        success: false,
+        message: response.data.message || 'API Error',
+        data: getDefaultData(),
+        cached: false,
+        cache_ttl: 0
+      };
+    }
+    
+    // Format sesuai dengan yang diharapkan hook
     return {
-        logbooks,
-        loading,
-        error,
-        pagination,
-        fetchLogbooks,
-        createLogbook,
-        updateLogbook,
-        deleteLogbook,
-        getLogbookDetail,
-        clearError
+      success: true,
+      data: response.data.data || response.data,
+      message: response.data.message,
+      cached: response.data.cached || false,
+      cache_ttl: response.data.cache_ttl || 0
     };
+  } catch (error: any) {
+    console.error('Fetcher Error:', {
+      url,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+    
+    // Jika error 404 atau siswa tidak ditemukan
+    if (error.response?.status === 404 || 
+        error.response?.data?.message?.includes('siswa') || 
+        error.response?.data?.message?.includes('tidak ditemukan')) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Data siswa tidak ditemukan',
+        data: getDefaultData(),
+        cached: false,
+        cache_ttl: 0
+      };
+    }
+    
+    // Untuk error 500 atau lainnya
+    if (error.response?.status === 500) {
+      return {
+        success: false,
+        message: 'Server error: ' + (error.response?.data?.message || 'Internal server error'),
+        data: getDefaultData(),
+        cached: false,
+        cache_ttl: 0
+      };
+    }
+    
+    throw error;
+  }
 };
+
+const getDefaultData = (): BatchLogbookData => ({
+  logbook_list: [],
+  dudi_list: [],
+  magang_info: {
+    status: 'tidak_aktif',
+    tanggal_mulai: '',
+    tanggal_selesai: '',
+  },
+  timestamp: new Date().toISOString(),
+  version: '1.0'
+});
+
+// ============= BATCH HOOK (MAIN HOOK) =============
+export function useLogbookBatch(options?: {
+  realTime?: boolean;
+  pollingInterval?: number;
+}) {
+  const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
+  
+  const realTime = options?.realTime ?? true;
+  const pollingInterval = options?.pollingInterval ?? 3000;
+
+  const { data, error, mutate, isLoading, isValidating } = useSWR<ApiResponse<BatchLogbookData>>(
+    '/siswa/logbook/batch',
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: true,
+      dedupingInterval: 2000,
+      refreshInterval: realTime ? pollingInterval : 0,
+      focusThrottleInterval: 10000,
+      errorRetryCount: 2,
+      errorRetryInterval: 5000,
+      keepPreviousData: true,
+      revalidateIfStale: false,
+      shouldRetryOnError: (err) => {
+        // Jangan retry untuk error 404 (data tidak ditemukan)
+        return err.response?.status !== 404;
+      }
+    }
+  );
+
+  const refresh = useCallback(async () => {
+    await mutate();
+  }, [mutate]);
+
+  const forceRefresh = useCallback(async () => {
+    setDeletedIds(new Set());
+    await mutate(undefined, { revalidate: true });
+  }, [mutate]);
+
+  const markAsDeleted = useCallback((id: number) => {
+    setDeletedIds(prev => new Set([...prev, id]));
+  }, []);
+
+  const clearDeletedIds = useCallback(() => {
+    setDeletedIds(new Set());
+  }, []);
+
+  // Filter logbook yang dihapus
+  const filteredLogbook = useCallback(() => {
+    if (!data?.data?.logbook_list) return [];
+    
+    return data.data.logbook_list.filter(
+      (item: LogbookEntry) => !deletedIds.has(item.id)
+    );
+  }, [data?.data?.logbook_list, deletedIds]);
+
+  // Tentukan apakah ada error dari API response
+  const apiError = error || (data?.success === false ? new Error(data.message || 'API Error') : null);
+
+  return {
+    // HAPUS stats dan hanya ambil data yang diperlukan
+    logbook: filteredLogbook(),
+    dudi: data?.data?.dudi_list || [],
+    magangInfo: data?.data?.magang_info || { 
+      status: 'tidak_aktif', 
+      tanggal_mulai: '', 
+      tanggal_selesai: '' 
+    },
+    meta: data?.data?.meta, // Tambahkan meta untuk pagination
+    isLoading,
+    isValidating,
+    error: apiError,
+    isCached: data?.cached || false,
+    timestamp: data?.data?.timestamp || null,
+    version: data?.data?.version || '1.0',
+    refresh,
+    forceRefresh,
+    markAsDeleted,
+    clearDeletedIds,
+  };
+}
+
+// ============= MUTATIONS HOOK =============
+export function useLogbookMutations() {
+  const [loading, setLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+  const { mutate } = useSWRConfig();
+
+  const handleError = useCallback((error: any): never => {
+    if (error.response?.status === 422) {
+      setValidationErrors(error.response.data.errors || {});
+      throw new Error(error.response.data.message || 'Validasi gagal');
+    }
+    
+    // Handle error khusus untuk siswa tidak ditemukan
+    if (error.response?.status === 404 || 
+        error.response?.data?.message?.includes('siswa') ||
+        error.response?.data?.message?.includes('tidak ditemukan')) {
+      throw new Error('Data siswa tidak ditemukan. Silakan refresh halaman.');
+    }
+    
+    throw new Error(error.response?.data?.message || 'Terjadi kesalahan');
+  }, []);
+
+  const createLogbook = useCallback(async (data: CreateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const formData = new FormData();
+      formData.append('tanggal', data.tanggal);
+      formData.append('kegiatan', data.kegiatan);
+      formData.append('kendala', data.kendala);
+      if (data.file) {
+        formData.append('file', data.file);
+      }
+
+      // Gunakan endpoint CRUD yang benar
+      const response = await api.post<ApiResponse<LogbookEntry>>(
+        '/siswa/logbook',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      
+      await mutate('/siswa/logbook/batch');
+      return response.data;
+    } catch (error: any) {
+      throw handleError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [mutate, handleError]);
+
+  const updateLogbook = useCallback(async (id: number, data: UpdateLogbookData): Promise<ApiResponse<LogbookEntry>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const formData = new FormData();
+      
+      if (data.tanggal) formData.append('tanggal', data.tanggal);
+      if (data.kegiatan) formData.append('kegiatan', data.kegiatan);
+      if (data.kendala) formData.append('kendala', data.kendala);
+      if (data.file) formData.append('file', data.file);
+      if (data.remove_file) formData.append('remove_file', '1');
+
+      const response = await api.post<ApiResponse<LogbookEntry>>(
+        `/siswa/logbook/${id}?_method=PUT`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      
+      await mutate('/siswa/logbook/batch');
+      return response.data;
+    } catch (error: any) {
+      throw handleError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [mutate, handleError]);
+
+  const deleteLogbook = useCallback(async (id: number): Promise<ApiResponse<null>> => {
+    setLoading(true);
+    setValidationErrors({});
+
+    try {
+      const response = await api.delete<ApiResponse<null>>(`/siswa/logbook/${id}`);
+      await mutate('/siswa/logbook/batch');
+      return response.data;
+    } catch (error: any) {
+      throw handleError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [mutate, handleError]);
+
+  const clearCache = useCallback(async (): Promise<ApiResponse<null>> => {
+    try {
+      const response = await api.post<ApiResponse<null>>('/siswa/logbook/batch/clear-cache');
+      await mutate('/siswa/logbook/batch', undefined, { revalidate: true });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Gagal membersihkan cache');
+    }
+  }, [mutate]);
+
+  return {
+    createLogbook,
+    updateLogbook,
+    deleteLogbook,
+    clearCache,
+    loading,
+    validationErrors,
+    clearErrors: useCallback(() => setValidationErrors({}), []),
+  };
+}

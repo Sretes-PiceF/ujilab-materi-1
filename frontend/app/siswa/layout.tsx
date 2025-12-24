@@ -1,6 +1,7 @@
 // app/siswa/layout.tsx
 import { AppSidebarSiswa } from "@/components/layout/siswa/App-sidebar";
 import { TopbarSiswa } from "@/components/layout/siswa/Topbar";
+import { NotificationProvider } from "@/components/ui/Notification/NotificationContext";
 
 // Lebar Sidebar adalah w-72 (tailwind class)
 const MAIN_CONTENT_MARGIN_CLASS = "ml-72"; // Margin harus sama dengan lebar sidebar
@@ -18,7 +19,10 @@ export default function SiswaLayout({ children }: { children: React.ReactNode })
                 
                 {/* KONTEN UTAMA - Scrollable */}
                 <main className="flex-1 overflow-y-auto">
-                    {children}
+                    {/* TAMBAHKAN NotificationProvider DI SINI */}
+                    <NotificationProvider>
+                        {children}
+                    </NotificationProvider>
                 </main>
             </div>
         </div>

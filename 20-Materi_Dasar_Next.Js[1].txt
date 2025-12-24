@@ -192,7 +192,7 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Menampilkan posisi user (GPS)
 
 ==============================================
-		OTW
+		OTW(Sekarang)
 ==============================================
 
 ---
@@ -218,7 +218,7 @@ Materi berikut telah diperbaiki, disusun ulang dari **paling dasar → paling la
 * Notifikasi interaktif (punya tombol aksi)
 
 =======================================================
-		Ada tetapi tidak dari Supabase
+		Selesai tetapi tidak dari Supabase
 =======================================================
 
 ---

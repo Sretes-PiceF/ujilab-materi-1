@@ -4,7 +4,8 @@ import {
     GraduationCap,
     Building2,
     BookOpen,
-    LayoutDashboardIcon
+    LayoutDashboardIcon,
+    LogOut
 } from "lucide-react";
 import { SidebarNav } from "./Sidebar-nav";
 
@@ -32,6 +33,13 @@ const navigationItems = [
         icon: BookOpen,
         href: "/guru/logbook",
         description: "Catatan harian",
+    },
+    {
+        title: "Logout",
+        icon: LogOut,
+        href: "/",
+        isLogout: true,
+        description: "Keluar",
     },
 ];
 

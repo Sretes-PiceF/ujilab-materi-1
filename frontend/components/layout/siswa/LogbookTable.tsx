@@ -9,17 +9,19 @@ import {
   Trash2,
   Plus,
   BookOpen,
+  RefreshCw,
+  Database,
 } from "lucide-react";
-import { useLogbook, LogbookData } from "@/hooks/siswa/useLogbook";
+import { useLogbookBatch, useLogbookMutations, LogbookEntry } from "@/hooks/siswa/useLogbook";
 import { TambahLogbookModal } from "./create/LogbookModal";
 import { LogbookUpdateModal } from "./update/LogbookUpdate";
-import { supabase } from "@/lib/supabaseClient";
+import { useNotification } from "@/components/ui/Notification/NotificationContext";
 
 interface LogbookTableProps {
   onAddLogbook?: () => void;
-  onViewDetail?: (logbook: LogbookData) => void;
-  onEdit?: (logbook: LogbookData) => void;
-  onDelete?: (logbook: LogbookData) => void;
+  onViewDetail?: (logbook: LogbookEntry) => void;
+  onEdit?: (logbook: LogbookEntry) => void;
+  onDelete?: (logbook: LogbookEntry) => void;
   statusMagang?: string;
   showAddButton?: boolean;
   refreshTrigger?: number;
@@ -35,19 +37,6 @@ const mapStatus = (status: string): string => {
       return "Ditolak";
     default:
       return status;
-  }
-};
-
-const mapStatusToBackend = (status: string): string => {
-  switch (status) {
-    case "Belum Diverifikasi":
-      return "pending";
-    case "Disetujui":
-      return "disetujui";
-    case "Ditolak":
-      return "ditolak";
-    default:
-      return "all";
   }
 };
 
@@ -108,40 +97,73 @@ export function LogbookTable({
   statusMagang,
   refreshTrigger = 0,
 }: LogbookTableProps) {
-  const { logbooks, loading, error, pagination, fetchLogbooks, deleteLogbook } =
-    useLogbook();
+  // Gunakan hooks baru
+  const {
+    logbook: logbookData,
+    magangInfo,
+    meta,
+    isLoading, // ✅ GANTI loading dengan isLoading
+    isValidating,
+    refresh,
+    forceRefresh,
+    error: apiError,
+  } = useLogbookBatch({
+    realTime: true,
+    pollingInterval: 5000,
+  });
+
+  const { deleteLogbook, clearCache, loading: mutating } = useLogbookMutations();
+  const { showNotification } = useNotification();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [showTambahModal, setShowTambahModal] = useState(false);
-  const [selectedLogbook, setSelectedLogbook] = useState<LogbookData | null>(
-    null
-  );
+  const [selectedLogbook, setSelectedLogbook] = useState<LogbookEntry | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // ✅ Penanda loading hanya pertama kali
   const isFirstLoad = useRef(true);
 
-  const canAddLogbook =
-    statusMagang === "berlangsung" || statusMagang === "diterima";
+  // Gunakan magangInfo dari hook untuk status magang
+  const effectiveStatusMagang = statusMagang || magangInfo.status;
+  const canAddLogbook = effectiveStatusMagang === "berlangsung" || effectiveStatusMagang === "diterima";
 
   // ✅ Fungsi refresh data dengan parameter yang jelas
-  const refreshData = useCallback(
-    async (page: number, perPage: number, search: string, status: string) => {
-      const backendStatus =
-        status === "Semua" ? "all" : mapStatusToBackend(status);
-      await fetchLogbooks(page, perPage, search, backendStatus);
-    },
-    [fetchLogbooks]
-  );
+  const refreshData = useCallback(async () => {
+    try {
+      await refresh();
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    }
+  }, [refresh]);
+
+  // ✅ Handle manual refresh dengan notifikasi
+  const handleManualRefresh = useCallback(async () => {
+    try {
+      await forceRefresh();
+      showNotification("Data berhasil diperbarui", "success");
+    } catch {
+      showNotification("Gagal memperbarui data", "error");
+    }
+  }, [forceRefresh, showNotification]);
+
+  // ✅ Handle clear cache
+  const handleClearCache = useCallback(async () => {
+    try {
+      await clearCache();
+      showNotification("Cache berhasil dibersihkan", "success");
+    } catch {
+      showNotification("Gagal membersihkan cache", "error");
+    }
+  }, [clearCache, showNotification]);
 
   // ✅ INITIAL DATA FETCH - sekali saat mount
   useEffect(() => {
     const initialFetch = async () => {
       try {
-        await refreshData(1, 10, "", "Semua");
+        await refreshData();
       } finally {
         isFirstLoad.current = false;
       }
@@ -153,78 +175,71 @@ export function LogbookTable({
   // ✅ REFRESH TRIGGER dari parent
   useEffect(() => {
     if (!isFirstLoad.current && refreshTrigger > 0) {
-      refreshData(currentPage, entriesPerPage, searchTerm, statusFilter);
+      refreshData();
     }
-  }, [
-    refreshTrigger,
-    currentPage,
-    entriesPerPage,
-    searchTerm,
-    statusFilter,
-    refreshData,
-  ]);
+  }, [refreshTrigger, refreshData]);
 
-  // ✅ REALTIME SUBSCRIPTION - refresh dengan state saat ini
-  useEffect(() => {
-    if (!supabase || isFirstLoad.current) return;
-
-    const channel = supabase
-      .channel("logbook-siswa-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "logbook",
-        },
-        async (payload) => {
-          console.log("Logbook realtime event:", payload.eventType);
-          // ✅ Silent refresh dengan state pagination saat ini
-          await refreshData(
-            currentPage,
-            entriesPerPage,
-            searchTerm,
-            statusFilter
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentPage, entriesPerPage, searchTerm, statusFilter, refreshData]);
-
-  // ✅ SEARCH & FILTER dengan debounce (skip saat initial load)
+  // ✅ SEARCH & FILTER dengan debounce (client-side)
   useEffect(() => {
     if (isFirstLoad.current) return;
 
     const timer = setTimeout(() => {
-      refreshData(1, entriesPerPage, searchTerm, statusFilter);
-      setCurrentPage(1);
+      setCurrentPage(1); // Reset ke halaman 1 saat search/filter
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter, entriesPerPage, refreshData]);
+  }, [searchTerm, statusFilter]);
 
   // Handler untuk perubahan halaman
-  const handlePageChange = async (page: number) => {
+  const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    await refreshData(page, entriesPerPage, searchTerm, statusFilter);
   };
 
   // Handler untuk perubahan entries per page
-  const handleEntriesPerPageChange = async (value: number) => {
+  const handleEntriesPerPageChange = (value: number) => {
     setEntriesPerPage(value);
     setCurrentPage(1);
-    await refreshData(1, value, searchTerm, statusFilter);
   };
 
-  const shouldShowActions = (logbook: LogbookData): boolean => {
+  // Filter data berdasarkan search dan status
+  const filteredData = logbookData.filter((log) => {
+    const matchesSearch =
+      log.kegiatan?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.kendala?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const backendStatus = statusFilter === "Semua" 
+      ? "all" 
+      : statusFilter === "Belum Diverifikasi" 
+        ? "pending" 
+        : statusFilter === "Disetujui" 
+          ? "disetujui" 
+          : "ditolak";
+    
+    const matchesStatus = backendStatus === "all" || log.status_verifikasi === backendStatus;
+    return matchesSearch && matchesStatus;
+  }).sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+
+  // Hitung pagination info berdasarkan data yang difilter
+  const totalItems = filteredData.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / entriesPerPage));
+  const startIndex = (currentPage - 1) * entriesPerPage;
+  const paginatedData = filteredData.slice(startIndex, startIndex + entriesPerPage);
+
+  // Info pagination untuk ditampilkan
+  const paginationInfo = {
+    current_page: currentPage,
+    last_page: totalPages,
+    per_page: entriesPerPage,
+    total: totalItems,
+    from: totalItems > 0 ? startIndex + 1 : 0,
+    to: Math.min(startIndex + entriesPerPage, totalItems),
+  };
+
+  const shouldShowActions = (logbook: LogbookEntry): boolean => {
     return logbook.status_verifikasi === "pending";
   };
 
-  const handleViewDetail = (logbook: LogbookData) => {
+  const handleViewDetail = (logbook: LogbookEntry) => {
     if (onViewDetail) {
       onViewDetail(logbook);
     } else {
@@ -232,16 +247,17 @@ export function LogbookTable({
     }
   };
 
-  const handleEdit = (logbook: LogbookData) => {
+  const handleEdit = (logbook: LogbookEntry) => {
     if (!canAddLogbook) {
-      alert(
-        "Anda tidak dapat mengedit logbook karena magang sudah selesai atau belum dimulai"
+      showNotification(
+        "Anda tidak dapat mengedit logbook karena magang sudah selesai atau belum dimulai",
+        "error"
       );
       return;
     }
 
     if (logbook.status_verifikasi !== "pending") {
-      alert("Logbook yang sudah diverifikasi tidak dapat diedit");
+      showNotification("Logbook yang sudah diverifikasi tidak dapat diedit", "error");
       return;
     }
 
@@ -253,16 +269,17 @@ export function LogbookTable({
     }
   };
 
-  const handleDelete = async (logbook: LogbookData) => {
+  const handleDelete = async (logbook: LogbookEntry) => {
     if (!canAddLogbook) {
-      alert(
-        "Anda tidak dapat menghapus logbook karena magang sudah selesai atau belum dimulai"
+      showNotification(
+        "Anda tidak dapat menghapus logbook karena magang sudah selesai atau belum dimulai",
+        "error"
       );
       return;
     }
 
     if (logbook.status_verifikasi !== "pending") {
-      alert("Logbook yang sudah diverifikasi tidak dapat dihapus");
+      showNotification("Logbook yang sudah diverifikasi tidak dapat dihapus", "error");
       return;
     }
 
@@ -274,21 +291,23 @@ export function LogbookTable({
       try {
         const result = await deleteLogbook(logbook.id);
         if (result.success) {
-          alert("Logbook berhasil dihapus");
+          showNotification("Logbook berhasil dihapus", "success");
+          await refreshData(); // Refresh data setelah delete
         } else {
-          alert("Gagal menghapus logbook: " + result.message);
+          showNotification("Gagal menghapus logbook: " + result.message, "error");
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error deleting logbook:", error);
-        alert("Terjadi kesalahan saat menghapus logbook");
+        showNotification("Terjadi kesalahan saat menghapus logbook", "error");
       }
     }
   };
 
   const handleAddLogbook = () => {
     if (!canAddLogbook) {
-      alert(
-        "Anda tidak dapat menambah logbook karena magang belum dimulai atau sudah selesai"
+      showNotification(
+        "Anda tidak dapat menambah logbook karena magang belum dimulai atau sudah selesai",
+        "error"
       );
       return;
     }
@@ -303,12 +322,16 @@ export function LogbookTable({
   const handleSuccessTambahLogbook = () => {
     console.log("Logbook berhasil ditambahkan");
     setShowTambahModal(false);
+    showNotification("Logbook berhasil ditambahkan", "success");
+    refreshData();
   };
 
   const handleSuccessUpdate = () => {
     console.log("Logbook berhasil diupdate");
     setShowUpdateModal(false);
     setSelectedLogbook(null);
+    showNotification("Logbook berhasil diperbarui", "success");
+    refreshData();
   };
 
   const getStatusClass = (status: string) => {
@@ -325,11 +348,14 @@ export function LogbookTable({
   };
 
   const getStatusMessage = () => {
-    switch (statusMagang) {
+    const status = effectiveStatusMagang || 'tidak_aktif';
+    switch (status) {
       case "selesai":
       case "berlangsung":
         return {
-          message: "Magang Anda sedang / telah selesai.",
+          message: status === "berlangsung" 
+            ? "Magang Anda sedang berlangsung." 
+            : "Magang Anda telah selesai.",
           style: {
             bg: "bg-green-50 border-green-200",
             text: "text-green-800",
@@ -375,14 +401,12 @@ export function LogbookTable({
 
   const statusMessage = getStatusMessage();
 
-  if (error) {
+  if (apiError && !isFirstLoad.current) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-        <p className="text-red-700 mb-4">Error: {error}</p>
+        <p className="text-red-700 mb-4">Error: {apiError.message}</p>
         <button
-          onClick={() =>
-            refreshData(currentPage, entriesPerPage, searchTerm, statusFilter)
-          }
+          onClick={handleManualRefresh}
           className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
         >
           Coba Lagi
@@ -404,6 +428,7 @@ export function LogbookTable({
       )}
 
       <div className="bg-white shadow-sm rounded-xl border border-gray-100 overflow-hidden">
+        {/* Header dengan tombol tambahan */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-[#4FC3F7]" />
@@ -412,15 +437,35 @@ export function LogbookTable({
             </h2>
           </div>
 
-          {showAddButton && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleAddLogbook}
-              className="px-4 py-2 bg-[#4FC3F7] text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading && isFirstLoad.current}
+              onClick={handleClearCache}
+              disabled={mutating || isValidating}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50"
             >
-              <Plus className="h-4 w-4" /> Tambah Logbook
+              <Database className="h-4 w-4" />
+              Clear Cache
             </button>
-          )}
+            
+            <button
+              onClick={handleManualRefresh}
+              disabled={isValidating || mutating}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} />
+              {isValidating ? "Memperbarui..." : "Refresh"}
+            </button>
+
+            {showAddButton && canAddLogbook && (
+              <button
+                onClick={handleAddLogbook}
+                className="px-4 py-2 bg-[#4FC3F7] text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isLoading && isFirstLoad.current} // ✅ FIX: Ganti loading dengan isLoading
+              >
+                <Plus className="h-4 w-4" /> Tambah Logbook
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
@@ -431,7 +476,7 @@ export function LogbookTable({
                 placeholder="Cari kegiatan atau kendala..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                disabled={loading && isFirstLoad.current}
+                disabled={isLoading && isFirstLoad.current} // ✅ FIX: Ganti loading dengan isLoading
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               />
             </div>
@@ -444,7 +489,7 @@ export function LogbookTable({
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  disabled={loading && isFirstLoad.current}
+                  disabled={isLoading && isFirstLoad.current} // ✅ FIX: Ganti loading dengan isLoading
                   className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value="Semua">Semua</option>
@@ -463,7 +508,7 @@ export function LogbookTable({
                   onChange={(e) =>
                     handleEntriesPerPageChange(Number(e.target.value))
                   }
-                  disabled={loading && isFirstLoad.current}
+                  disabled={isLoading && isFirstLoad.current} // ✅ FIX: Ganti loading dengan isLoading
                   className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value={5}>5</option>
@@ -498,9 +543,9 @@ export function LogbookTable({
             </thead>
 
             {/* ✅ Loading State hanya untuk initial load */}
-            {loading && isFirstLoad.current ? (
+            {isLoading && isFirstLoad.current ? ( // ✅ FIX: Ganti loading dengan isLoading
               <TableLoadingSkeleton />
-            ) : logbooks.length === 0 ? (
+            ) : paginatedData.length === 0 ? (
               <tbody className="bg-white">
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center">
@@ -515,7 +560,7 @@ export function LogbookTable({
               </tbody>
             ) : (
               <tbody className="bg-white divide-y divide-gray-100">
-                {logbooks.map((log) => (
+                {paginatedData.map((log) => (
                   <tr
                     key={log.id}
                     className="hover:bg-gray-50 transition-colors"
@@ -646,13 +691,13 @@ export function LogbookTable({
           </table>
 
           {/* Pagination */}
-          {logbooks.length > 0 && (
+          {paginatedData.length > 0 && (
             <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
               <p className="text-sm text-gray-600">
                 Menampilkan{" "}
-                <span className="font-semibold">{pagination.from}</span> sampai{" "}
-                <span className="font-semibold">{pagination.to}</span> dari{" "}
-                <span className="font-semibold">{pagination.total}</span>{" "}
+                <span className="font-semibold">{paginationInfo.from}</span> sampai{" "}
+                <span className="font-semibold">{paginationInfo.to}</span> dari{" "}
+                <span className="font-semibold">{paginationInfo.total}</span>{" "}
                 logbook
               </p>
               <div className="flex gap-2">
@@ -664,7 +709,7 @@ export function LogbookTable({
                   Sebelumnya
                 </button>
                 {Array.from(
-                  { length: pagination.last_page },
+                  { length: paginationInfo.last_page },
                   (_, i) => i + 1
                 ).map((page) => (
                   <button
@@ -681,7 +726,7 @@ export function LogbookTable({
                 ))}
                 <button
                   onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === pagination.last_page}
+                  disabled={currentPage === paginationInfo.last_page}
                   className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Selanjutnya

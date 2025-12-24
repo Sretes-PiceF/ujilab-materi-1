@@ -70,19 +70,19 @@ class Dudi extends Model
         // Broadcast saat created
         static::created(function ($dudi) {
             Log::info('Dudi Created Event', ['id' => $dudi->id]);
-            broadcast(new \App\Events\dudi\DudiCreated($dudi))->toOthers();
+            broadcast(new \App\Events\guru\dudi\DudiCreated($dudi))->toOthers();
         });
 
         // Broadcast saat updated
         static::updated(function ($dudi) {
             Log::info('Dudi Updated Event', ['id' => $dudi->id]);
-            broadcast(new \App\Events\dudi\DudiUpdated($dudi))->toOthers();
+            broadcast(new \App\Events\guru\dudi\DudiUpdated($dudi))->toOthers();
         });
 
         // Broadcast saat deleted
         static::deleted(function ($dudi) {
             Log::info('Dudi Deleted Event', ['id' => $dudi->id]);
-            broadcast(new \App\Events\dudi\DudiDeleted($dudi->id))->toOthers();
+            broadcast(new \App\Events\guru\dudi\DudiDeleted($dudi->id))->toOthers();
         });
     }
 }

@@ -3,9 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Logbook;
-use App\Events\LogbookUpdated;
-use App\Events\LogbookCreated;
-use App\Events\LogbookDeleted;
+use App\Events\guru\logbook\LogbookUpdated;
+use App\Events\guru\logbook\LogbookDeleted;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Cache;
@@ -17,37 +16,38 @@ use Illuminate\Support\Facades\DB;
 class LogbookGuruController extends Controller
 {
     /**
-     * ✅ CLEAR ALL CACHE
+     * ✅ CLEAR ALL CACHE - SINGLE METHOD UNTUK SEMUA
      */
     private function clearAllLogbookCache()
     {
         try {
             $userId = Auth::id() ?? 'guest';
+            $requestHash = md5(request()->fullUrl());
 
-            // Array cache keys yang akan dihapus
+            // Clear semua cache key yang relevan
             $cacheKeys = [
+                "logbook:batch:{$userId}:{$requestHash}",
                 "logbook:batch:{$userId}",
                 "logbook:batch:guest",
                 "logbook:stats",
                 "logbook:list",
-                "logbook:all"
+                "logbook:all",
             ];
 
             foreach ($cacheKeys as $key) {
                 Cache::forget($key);
             }
 
-            // Jika menggunakan Redis, clear dengan pattern
+            // Clear dengan pattern untuk Redis
             if (config('cache.default') === 'redis') {
                 try {
                     $redis = Cache::getRedis();
                     $prefix = config('cache.prefix', 'laravel_cache');
 
-                    // Get all keys with logbook pattern
-                    $keys = $redis->keys($prefix . ':*logbook*');
+                    // Clear semua cache yang mengandung kata 'logbook'
+                    $keys = $redis->keys("{$prefix}:*logbook*");
 
                     foreach ($keys as $key) {
-                        // Remove prefix before forgetting
                         $cleanKey = str_replace($prefix . ':', '', $key);
                         Cache::forget($cleanKey);
                     }
@@ -57,13 +57,13 @@ class LogbookGuruController extends Controller
                         'user_id' => $userId
                     ]);
                 } catch (\Exception $e) {
-                    Log::warning('Failed to clear Redis cache pattern', [
+                    Log::warning('Redis pattern clear failed', [
                         'error' => $e->getMessage()
                     ]);
                 }
             }
 
-            Log::info('All logbook cache cleared successfully');
+            Log::info('Logbook cache cleared', ['user_id' => $userId]);
             return true;
         } catch (\Exception $e) {
             Log::error('Failed to clear logbook cache: ' . $e->getMessage());
@@ -79,7 +79,7 @@ class LogbookGuruController extends Controller
     {
         try {
             $cacheKey = 'logbook:stats';
-            $cacheDuration = 30; // 30 detik
+            $cacheDuration = 10; // 10 detik untuk lebih realtime
 
             $data = Cache::remember($cacheKey, $cacheDuration, function () {
                 return [
@@ -93,9 +93,11 @@ class LogbookGuruController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $data,
-                'cached' => Cache::has($cacheKey)
+                'cached' => Cache::has($cacheKey),
+                'timestamp' => now()->toDateTimeString()
             ], 200);
         } catch (\Throwable $th) {
+            Log::error('Get all logbook failed', ['error' => $th->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengambil data stats logbook',
@@ -111,8 +113,10 @@ class LogbookGuruController extends Controller
     public function index(Request $request)
     {
         try {
-            $cacheKey = 'logbook:list:' . md5(json_encode($request->all()));
-            $cacheDuration = 30; // 30 detik
+            // Gunakan request hash untuk caching yang lebih spesifik
+            $requestHash = md5(json_encode($request->all()));
+            $cacheKey = 'logbook:list:' . $requestHash;
+            $cacheDuration = 10; // 10 detik untuk realtime
 
             $result = Cache::remember($cacheKey, $cacheDuration, function () use ($request) {
                 $perPage = $request->input('per_page', 10);
@@ -193,9 +197,11 @@ class LogbookGuruController extends Controller
                 'data' => $result['data'],
                 'meta' => $result['meta'],
                 'message' => 'Data logbook berhasil diambil',
-                'cached' => Cache::has($cacheKey)
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration
             ]);
         } catch (\Exception $e) {
+            Log::error('Get logbook list failed', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengambil data logbook',
@@ -243,14 +249,18 @@ class LogbookGuruController extends Controller
             }
 
             $logbook = Logbook::create($logbookData);
-            $logbook->load(['magang.siswa', 'magang.dudi']);
+            $logbook->load(['magang.siswa.user', 'magang.dudi']);
 
-            // Clear cache
+            // Clear cache untuk refresh data realtime
             $this->clearAllLogbookCache();
 
-            // Broadcast event
-            broadcast(new LogbookCreated($logbook))->toOthers();
-            Log::info('LogbookCreated event broadcasted', ['logbook_id' => $logbook->id]);
+            // Broadcast event untuk realtime update
+            broadcast(new LogbookUpdated($logbook, 'created'))->toOthers();
+
+            Log::info('Logbook created and broadcasted', [
+                'logbook_id' => $logbook->id,
+                'siswa' => $logbook->magang->siswa->nama ?? 'Unknown'
+            ]);
 
             DB::commit();
 
@@ -258,7 +268,8 @@ class LogbookGuruController extends Controller
                 'success' => true,
                 'message' => 'Logbook berhasil dibuat',
                 'data' => $logbook,
-                'cache_cleared' => true
+                'cache_cleared' => true,
+                'broadcasted' => true
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -272,61 +283,6 @@ class LogbookGuruController extends Controller
     }
 
     /**
-     * ✅ SHOW LOGBOOK DETAIL
-     * Route: GET /api/logbook/{id}
-     */
-    public function show($id)
-    {
-        try {
-            $logbook = Logbook::with([
-                'magang.siswa.user',
-                'magang.dudi'
-            ])->findOrFail($id);
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'id' => $logbook->id,
-                    'magang_id' => $logbook->magang_id,
-                    'tanggal' => $logbook->tanggal->format('Y-m-d'),
-                    'tanggal_formatted' => $logbook->tanggal->format('d M Y'),
-                    'kegiatan' => $logbook->kegiatan,
-                    'kendala' => $logbook->kendala,
-                    'file' => $logbook->file,
-                    'status_verifikasi' => $logbook->status_verifikasi,
-                    'catatan_guru' => $logbook->catatan_guru,
-                    'catatan_dudi' => $logbook->catatan_dudi,
-                    'original_image' => $logbook->original_image,
-                    'webp_image' => $logbook->webp_image,
-                    'webp_thumbnail' => $logbook->webp_thumbnail,
-                    'original_size' => $logbook->original_size,
-                    'optimized_size' => $logbook->optimized_size,
-                    'siswa' => [
-                        'id' => $logbook->magang->siswa->id ?? null,
-                        'nama' => $logbook->magang->siswa->nama ?? 'N/A',
-                        'nis' => $logbook->magang->siswa->nis ?? 'N/A',
-                        'kelas' => $logbook->magang->siswa->kelas ?? 'N/A',
-                        'jurusan' => $logbook->magang->siswa->jurusan ?? 'N/A',
-                        'email' => $logbook->magang->siswa->email ?? 'N/A',
-                    ],
-                    'dudi' => [
-                        'id' => $logbook->magang->dudi->id ?? null,
-                        'nama_perusahaan' => $logbook->magang->dudi->nama_perusahaan ?? 'N/A',
-                    ],
-                    'created_at' => $logbook->created_at->format('Y-m-d H:i:s'),
-                    'updated_at' => $logbook->updated_at->format('Y-m-d H:i:s'),
-                ]
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Logbook tidak ditemukan',
-                'error' => $e->getMessage()
-            ], 404);
-        }
-    }
-
-    /**
      * ✅ UPDATE LOGBOOK
      * Route: POST /api/logbook/update/{id}
      */
@@ -335,7 +291,7 @@ class LogbookGuruController extends Controller
         DB::beginTransaction();
 
         try {
-            $logbook = Logbook::with(['magang.siswa', 'magang.dudi'])->find($id);
+            $logbook = Logbook::with(['magang.siswa.user', 'magang.dudi'])->find($id);
 
             if (!$logbook) {
                 return response()->json([
@@ -392,13 +348,15 @@ class LogbookGuruController extends Controller
 
             $logbook->update($updateData);
             $logbook->refresh();
-            $logbook->load(['magang.siswa', 'magang.dudi']);
+            $logbook->load(['magang.siswa.user', 'magang.dudi']);
 
-            // Clear cache
+            // Clear cache untuk refresh data realtime
             $this->clearAllLogbookCache();
 
-            // Broadcast event (akan auto-trigger dari model boot method)
-            Log::info('Logbook updated', [
+            // Broadcast event untuk realtime update
+            broadcast(new LogbookUpdated($logbook, 'updated'))->toOthers();
+
+            Log::info('Logbook updated and broadcasted', [
                 'logbook_id' => $logbook->id,
                 'status' => $logbook->status_verifikasi
             ]);
@@ -409,7 +367,8 @@ class LogbookGuruController extends Controller
                 'success' => true,
                 'message' => 'Logbook berhasil diupdate',
                 'data' => $logbook,
-                'cache_cleared' => true
+                'cache_cleared' => true,
+                'broadcasted' => true
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -444,7 +403,7 @@ class LogbookGuruController extends Controller
                 ], 422);
             }
 
-            $logbook = Logbook::with(['magang.siswa', 'magang.dudi'])->findOrFail($id);
+            $logbook = Logbook::with(['magang.siswa.user', 'magang.dudi'])->findOrFail($id);
 
             $logbook->update([
                 'status_verifikasi' => $request->status_verifikasi,
@@ -452,13 +411,15 @@ class LogbookGuruController extends Controller
             ]);
 
             $logbook->refresh();
-            $logbook->load(['magang.siswa', 'magang.dudi']);
+            $logbook->load(['magang.siswa.user', 'magang.dudi']);
 
-            // Clear cache
+            // Clear cache untuk refresh data realtime
             $this->clearAllLogbookCache();
 
-            // Broadcast akan auto-trigger dari model
-            Log::info('Logbook verified', [
+            // Broadcast event untuk realtime update
+            broadcast(new LogbookUpdated($logbook, 'verifikasi'))->toOthers();
+
+            Log::info('Logbook verified and broadcasted', [
                 'logbook_id' => $logbook->id,
                 'status' => $logbook->status_verifikasi
             ]);
@@ -469,7 +430,8 @@ class LogbookGuruController extends Controller
                 'success' => true,
                 'message' => 'Verifikasi logbook berhasil',
                 'data' => $logbook,
-                'cache_cleared' => true
+                'cache_cleared' => true,
+                'broadcasted' => true
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -491,7 +453,7 @@ class LogbookGuruController extends Controller
         DB::beginTransaction();
 
         try {
-            $logbook = Logbook::with(['magang.siswa', 'magang.dudi'])->find($id);
+            $logbook = Logbook::with(['magang.siswa.user', 'magang.dudi'])->find($id);
 
             if (!$logbook) {
                 return response()->json([
@@ -502,27 +464,34 @@ class LogbookGuruController extends Controller
 
             // Simpan data untuk broadcast
             $logbookId = $logbook->id;
-            $siswaNama = $logbook->magang->siswa->nama ?? 'Unknown';
+            $logbookData = $logbook->toArray();
 
             // Delete file if exists
             if ($logbook->file && Storage::disk('public')->exists($logbook->file)) {
                 Storage::disk('public')->delete($logbook->file);
             }
 
-            // Delete logbook (broadcast akan auto-trigger dari model)
+            // Delete logbook
             $logbook->delete();
 
-            // Clear cache
+            // Clear cache untuk refresh data realtime
             $this->clearAllLogbookCache();
 
-            Log::info('Logbook deleted', ['logbook_id' => $logbookId]);
+            // Broadcast event untuk realtime update
+            broadcast(new LogbookDeleted($logbookId))->toOthers();
+
+            Log::info('Logbook deleted and broadcasted', [
+                'logbook_id' => $logbookId,
+                'siswa' => $logbookData['siswa_nama'] ?? 'Unknown'
+            ]);
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Logbook berhasil dihapus',
-                'cache_cleared' => true
+                'cache_cleared' => true,
+                'broadcasted' => true
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -550,6 +519,7 @@ class LogbookGuruController extends Controller
                 'timestamp' => now()->toDateTimeString()
             ]);
         } catch (\Exception $e) {
+            Log::error('Failed to clear cache manually', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'Error clearing cache: ' . $e->getMessage()

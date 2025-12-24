@@ -4,26 +4,43 @@ namespace App\Http\Controllers;
 
 use App\Models\Logbook;
 use App\Models\Magang;
-use App\Models\Siswa;
+use App\Models\Siswa; // ✅ TAMBAHKAN IMPORT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
 
 class LogbookSiswaController extends Controller
 {
+    const CACHE_PREFIX = 'logbook:siswa:main';
+    const CACHE_TTL = 10;
+
+    /**
+     * ✅ HELPER METHOD UNTUK MENDAPATKAN SISWA
+     */
+    private function getSiswa()
+    {
+        $user = Auth::user();
+
+        if (!$user) {
+            return null;
+        }
+
+        // Cari siswa berdasarkan user_id (sesuai model Siswa Anda)
+        return Siswa::where('user_id', $user->id)->first();
+    }
 
     private function getActiveMagang()
     {
-        $siswa = Auth::user()->siswa;
+        $siswa = $this->getSiswa();
 
         if (!$siswa) {
             return null;
         }
 
-        // Cari magang dengan status 'berlangsung'
         $magang = Magang::where('siswa_id', $siswa->id)
             ->where('status', 'berlangsung')
             ->first();
@@ -31,11 +48,38 @@ class LogbookSiswaController extends Controller
         return $magang;
     }
 
-    // app/Http/Controllers/LogbookSiswaController.php
+    /**
+     * ✅ CLEAR CACHE METHOD
+     */
+    private function clearSiswaCache($siswaId = null)
+    {
+        try {
+            $siswa = $this->getSiswa();
+            $currentSiswaId = $siswaId ?? ($siswa ? $siswa->id : null);
+
+            // Clear cache keys
+            $cacheKeys = [
+                "logbook:siswa:main:{$currentSiswaId}",
+                "logbook:siswa:main:list:{$currentSiswaId}",
+                "logbook:siswa:main:stats:{$currentSiswaId}",
+                "logbook:siswa:main:status:{$currentSiswaId}",
+            ];
+
+            foreach ($cacheKeys as $key) {
+                Cache::forget($key);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to clear siswa logbook cache: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function getStatusMagang()
     {
         try {
-            $siswa = Auth::user()->siswa;
+            $siswa = $this->getSiswa();
 
             if (!$siswa) {
                 return response()->json([
@@ -44,27 +88,23 @@ class LogbookSiswaController extends Controller
                 ], 404);
             }
 
-            // Cari magang terbaru siswa
-            $latestMagang = Magang::where('siswa_id', $siswa->id)
-                ->orderBy('created_at', 'desc')
-                ->first();
+            $cacheKey = self::CACHE_PREFIX . ":status:{$siswa->id}";
+            $cacheDuration = self::CACHE_TTL;
 
-            if (!$latestMagang) {
-                // Jika tidak ada data magang sama sekali
-                return response()->json([
-                    'success' => true,
-                    'data' => [
-                        'status_magang' => 'pending', // atau status default sesuai bisnis logic
+            $data = Cache::remember($cacheKey, $cacheDuration, function () use ($siswa) {
+                $latestMagang = Magang::where('siswa_id', $siswa->id)
+                    ->orderBy('created_at', 'desc')
+                    ->first();
+
+                if (!$latestMagang) {
+                    return [
+                        'status_magang' => 'pending',
                         'has_magang' => false,
                         'magang' => null
-                    ],
-                    'message' => 'Belum memiliki data magang'
-                ]);
-            }
+                    ];
+                }
 
-            return response()->json([
-                'success' => true,
-                'data' => [
+                return [
                     'status_magang' => $latestMagang->status,
                     'has_magang' => true,
                     'magang' => [
@@ -77,8 +117,15 @@ class LogbookSiswaController extends Controller
                             'nama_perusahaan' => $latestMagang->dudi->nama_perusahaan ?? null,
                         ]
                     ]
-                ],
-                'message' => 'Status magang berhasil diambil'
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'message' => 'Status magang berhasil diambil',
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -92,7 +139,7 @@ class LogbookSiswaController extends Controller
     public function index(Request $request)
     {
         try {
-            $siswa = Auth::user()->siswa;
+            $siswa = $this->getSiswa();
 
             if (!$siswa) {
                 return response()->json([
@@ -105,57 +152,75 @@ class LogbookSiswaController extends Controller
             $search = $request->input('search', '');
             $status = $request->input('status', 'all');
 
-            // Ambil semua logbook berdasarkan magang siswa
-            $logbooks = Logbook::whereHas('magang', function ($query) use ($siswa) {
-                $query->where('siswa_id', $siswa->id);
-            })
-                ->with(['magang.dudi'])
-                ->when($search, function ($query) use ($search) {
-                    $query->where(function ($q) use ($search) {
-                        $q->where('kegiatan', 'ILIKE', "%{$search}%")
-                            ->orWhere('kendala', 'ILIKE', "%{$search}%");
-                    });
-                })
-                ->when($status !== 'all', function ($query) use ($status) {
-                    $query->where('status_verifikasi', $status);
-                })
-                ->orderBy('tanggal', 'desc')
-                ->orderBy('created_at', 'desc')
-                ->paginate($perPage);
+            $requestHash = md5(json_encode([
+                'siswa_id' => $siswa->id,
+                'per_page' => $perPage,
+                'search' => $search,
+                'status' => $status
+            ]));
 
-            // Transform data
-            $logbooks->getCollection()->transform(function ($logbook) {
+            $cacheKey = self::CACHE_PREFIX . ":list:{$siswa->id}:{$requestHash}";
+            $cacheDuration = self::CACHE_TTL;
+
+            $result = Cache::remember($cacheKey, $cacheDuration, function () use ($siswa, $perPage, $search, $status) {
+                $logbooks = Logbook::whereHas('magang', function ($query) use ($siswa) {
+                    $query->where('siswa_id', $siswa->id);
+                })
+                    ->with(['magang.dudi'])
+                    ->when($search, function ($query) use ($search) {
+                        $query->where(function ($q) use ($search) {
+                            $q->where('kegiatan', 'ILIKE', "%{$search}%")
+                                ->orWhere('kendala', 'ILIKE', "%{$search}%");
+                        });
+                    })
+                    ->when($status !== 'all', function ($query) use ($status) {
+                        $query->where('status_verifikasi', $status);
+                    })
+                    ->orderBy('tanggal', 'desc')
+                    ->orderBy('created_at', 'desc')
+                    ->paginate($perPage);
+
+                $logbooks->getCollection()->transform(function ($logbook) {
+                    return [
+                        'id' => $logbook->id,
+                        'magang_id' => $logbook->magang_id,
+                        'tanggal' => $logbook->tanggal->format('Y-m-d'),
+                        'tanggal_formatted' => $logbook->tanggal->format('d M Y'),
+                        'kegiatan' => $logbook->kegiatan,
+                        'kendala' => $logbook->kendala,
+                        'file' => $logbook->file ? url('storage/' . $logbook->file) : null,
+                        'status_verifikasi' => $logbook->status_verifikasi,
+                        'catatan_guru' => $logbook->catatan_guru,
+                        'catatan_dudi' => $logbook->catatan_dudi,
+                        'dudi' => [
+                            'id' => $logbook->magang->dudi->id ?? null,
+                            'nama_perusahaan' => $logbook->magang->dudi->nama_perusahaan ?? null,
+                        ],
+                        'created_at' => $logbook->created_at->format('Y-m-d H:i:s'),
+                        'updated_at' => $logbook->updated_at->format('Y-m-d H:i:s'),
+                    ];
+                });
+
                 return [
-                    'id' => $logbook->id,
-                    'magang_id' => $logbook->magang_id,
-                    'tanggal' => $logbook->tanggal->format('Y-m-d'),
-                    'tanggal_formatted' => $logbook->tanggal->format('d M Y'),
-                    'kegiatan' => $logbook->kegiatan,
-                    'kendala' => $logbook->kendala,
-                    'file' => $logbook->file ? url('storage/' . $logbook->file) : null,
-                    'status_verifikasi' => $logbook->status_verifikasi,
-                    'catatan_guru' => $logbook->catatan_guru,
-                    'catatan_dudi' => $logbook->catatan_dudi,
-                    'dudi' => [
-                        'id' => $logbook->magang->dudi->id ?? null,
-                        'nama_perusahaan' => $logbook->magang->dudi->nama_perusahaan ?? null,
-                    ],
-                    'created_at' => $logbook->created_at->format('Y-m-d H:i:s'),
-                    'updated_at' => $logbook->updated_at->format('Y-m-d H:i:s'),
+                    'data' => $logbooks->items(),
+                    'meta' => [
+                        'current_page' => $logbooks->currentPage(),
+                        'last_page' => $logbooks->lastPage(),
+                        'per_page' => $logbooks->perPage(),
+                        'total' => $logbooks->total(),
+                        'from' => $logbooks->firstItem(),
+                        'to' => $logbooks->lastItem(),
+                    ]
                 ];
             });
 
             return response()->json([
                 'success' => true,
-                'data' => $logbooks->items(),
-                'meta' => [
-                    'current_page' => $logbooks->currentPage(),
-                    'last_page' => $logbooks->lastPage(),
-                    'per_page' => $logbooks->perPage(),
-                    'total' => $logbooks->total(),
-                    'from' => $logbooks->firstItem(),
-                    'to' => $logbooks->lastItem(),
-                ]
+                'data' => $result['data'],
+                'meta' => $result['meta'],
+                'message' => 'Data logbook berhasil diambil',
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -166,10 +231,59 @@ class LogbookSiswaController extends Controller
         }
     }
 
+    /**
+     * ✅ GET STATS UNTUK SISWA
+     */
+    public function getStats()
+    {
+        try {
+            $siswa = $this->getSiswa();
+
+            if (!$siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data siswa tidak ditemukan'
+                ], 404);
+            }
+
+            $cacheKey = self::CACHE_PREFIX . ":stats:{$siswa->id}";
+            $cacheDuration = self::CACHE_TTL;
+
+            $stats = Cache::remember($cacheKey, $cacheDuration, function () use ($siswa) {
+                return [
+                    'total_logbook' => Logbook::whereHas('magang', function ($query) use ($siswa) {
+                        $query->where('siswa_id', $siswa->id);
+                    })->count(),
+                    'belum_diverifikasi' => Logbook::whereHas('magang', function ($query) use ($siswa) {
+                        $query->where('siswa_id', $siswa->id);
+                    })->where('status_verifikasi', 'pending')->count(),
+                    'disetujui' => Logbook::whereHas('magang', function ($query) use ($siswa) {
+                        $query->where('siswa_id', $siswa->id);
+                    })->where('status_verifikasi', 'disetujui')->count(),
+                    'ditolak' => Logbook::whereHas('magang', function ($query) use ($siswa) {
+                        $query->where('siswa_id', $siswa->id);
+                    })->where('status_verifikasi', 'ditolak')->count(),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $stats,
+                'message' => 'Stats logbook berhasil diambil',
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil stats logbook',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 
     public function store(Request $request)
     {
-        // Cek apakah siswa memiliki magang aktif
         $magang = $this->getActiveMagang();
 
         if (!$magang) {
@@ -179,14 +293,11 @@ class LogbookSiswaController extends Controller
             ], 403);
         }
 
-        // Validasi input dengan 3 file
         $validator = Validator::make($request->all(), [
             'tanggal' => 'required|date|before_or_equal:today',
             'kegiatan' => 'required|string|min:10',
             'kendala' => 'required|string|min:5',
-            'file' => 'nullable|image|mimes:jpeg,jpg,png|max:5120',      // JPG terkompresi dari frontend
-            'webp_image' => 'nullable|mimes:webp|max:5120',             // WebP utama dari frontend
-            'webp_thumbnail' => 'nullable|mimes:webp|max:2048',         // Thumbnail WebP dari frontend
+            'file' => 'nullable|image|mimes:jpeg,jpg,png|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -197,7 +308,6 @@ class LogbookSiswaController extends Controller
             ], 422);
         }
 
-        // Cek duplikat tanggal
         $existingLogbook = Logbook::where('magang_id', $magang->id)
             ->whereDate('tanggal', $request->tanggal)
             ->first();
@@ -209,68 +319,24 @@ class LogbookSiswaController extends Controller
             ], 422);
         }
 
-        // Data logbook dasar
         $logbookData = [
             'magang_id' => $magang->id,
             'tanggal' => $request->tanggal,
             'kegiatan' => $request->kegiatan,
             'kendala' => $request->kendala,
             'status_verifikasi' => 'pending',
-            'original_size' => $request->original_size ?? 0,
-            'optimized_size' => $request->compressed_size ?? 0,
         ];
 
-        // Generate unique base filename untuk semua file
-        $timestamp = time();
-        $randomString = Str::random(10);
-        $baseFilename = 'logbook_' . $timestamp . '_' . $randomString;
-        $directory = 'logbook';
-
-        // Handle upload MULTIPLE FILES dari frontend
-        $hasAnyFile = $request->hasFile('file') ||
-            $request->hasFile('webp_image') ||
-            $request->hasFile('webp_thumbnail');
-
-        if ($hasAnyFile) {
-            // 1. Simpan file JPG (dari field 'file' - untuk kompatibilitas)
-            if ($request->hasFile('file')) {
-                $file = $request->file('file');
-                $jpgFilename = $baseFilename . '.jpg';
-                $jpgPath = $file->storeAs($directory, $jpgFilename, 'public');
-
-                $logbookData['file'] = $jpgPath;           // Legacy column
-                $logbookData['original_image'] = $jpgPath; // Original column
-            }
-
-            // 2. Simpan WebP image (utama)
-            if ($request->hasFile('webp_image')) {
-                $webpFile = $request->file('webp_image');
-                $webpFilename = $baseFilename . '.webp';
-                $webpPath = $webpFile->storeAs($directory, $webpFilename, 'public');
-                $logbookData['webp_image'] = $webpPath;
-
-                // Jika tidak ada JPG, gunakan WebP sebagai fallback
-                if (!isset($logbookData['file'])) {
-                    $logbookData['file'] = $webpPath;
-                    $logbookData['original_image'] = $webpPath;
-                }
-            }
-
-            // 3. Simpan WebP thumbnail
-            if ($request->hasFile('webp_thumbnail')) {
-                $thumbnailFile = $request->file('webp_thumbnail');
-                $thumbnailFilename = $baseFilename . '_thumbnail.webp';
-                $thumbnailPath = $thumbnailFile->storeAs($directory, $thumbnailFilename, 'public');
-                $logbookData['webp_thumbnail'] = $thumbnailPath;
-            }
-            // Jika tidak ada thumbnail, jangan buat dari webp_image
-            // Biarkan NULL saja, jangan duplicate
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $fileName = 'logbook_' . time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+            $filePath = $file->storeAs('logbook', $fileName, 'public');
+            $logbookData['file'] = $filePath;
         }
 
-        // Simpan logbook ke database
         $logbook = Logbook::create($logbookData);
+        $this->clearSiswaCache($magang->siswa_id);
 
-        // Return response
         return response()->json([
             'success' => true,
             'message' => 'Logbook berhasil ditambahkan',
@@ -282,29 +348,34 @@ class LogbookSiswaController extends Controller
                 'kendala' => $logbook->kendala,
                 'status_verifikasi' => $logbook->status_verifikasi,
                 'file_url' => $logbook->file ? url('storage/' . $logbook->file) : null,
-                'webp_image_url' => $logbook->webp_image ? url('storage/' . $logbook->webp_image) : null,
-                'thumbnail_url' => $logbook->webp_thumbnail ? url('storage/' . $logbook->webp_thumbnail) : null,
-            ]
+            ],
+            'cache_cleared' => true
         ], 201);
     }
 
-    /**
-     * Tampilkan detail logbook
-     */
     public function show($id)
     {
         try {
-            $siswa = Auth::user()->siswa;
+            $siswa = $this->getSiswa();
 
-            $logbook = Logbook::whereHas('magang', function ($query) use ($siswa) {
-                $query->where('siswa_id', $siswa->id);
-            })
-                ->with(['magang.dudi'])
-                ->findOrFail($id);
+            if (!$siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data siswa tidak ditemukan'
+                ], 404);
+            }
 
-            return response()->json([
-                'success' => true,
-                'data' => [
+            $cacheKey = self::CACHE_PREFIX . ":detail:{$siswa->id}:{$id}";
+            $cacheDuration = self::CACHE_TTL;
+
+            $data = Cache::remember($cacheKey, $cacheDuration, function () use ($siswa, $id) {
+                $logbook = Logbook::whereHas('magang', function ($query) use ($siswa) {
+                    $query->where('siswa_id', $siswa->id);
+                })
+                    ->with(['magang.dudi'])
+                    ->findOrFail($id);
+
+                return [
                     'id' => $logbook->id,
                     'magang_id' => $logbook->magang_id,
                     'tanggal' => $logbook->tanggal->format('Y-m-d'),
@@ -321,7 +392,14 @@ class LogbookSiswaController extends Controller
                     ],
                     'created_at' => $logbook->created_at->format('Y-m-d H:i:s'),
                     'updated_at' => $logbook->updated_at->format('Y-m-d H:i:s'),
-                ]
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'cached' => Cache::has($cacheKey),
+                'cache_ttl' => $cacheDuration
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -332,18 +410,22 @@ class LogbookSiswaController extends Controller
         }
     }
 
-
     public function update(Request $request, $id)
     {
         try {
-            $siswa = Auth::user()->siswa;
+            $siswa = $this->getSiswa();
 
-            // Cari logbook milik siswa
+            if (!$siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data siswa tidak ditemukan'
+                ], 404);
+            }
+
             $logbook = Logbook::whereHas('magang', function ($query) use ($siswa) {
                 $query->where('siswa_id', $siswa->id);
             })->findOrFail($id);
 
-            // Cek apakah logbook masih bisa diedit (hanya yang pending)
             if ($logbook->status_verifikasi !== 'pending') {
                 return response()->json([
                     'success' => false,
@@ -351,20 +433,11 @@ class LogbookSiswaController extends Controller
                 ], 403);
             }
 
-            // ✅ PERBAIKAN: Semua field OPTIONAL untuk update
             $validator = Validator::make($request->all(), [
                 'tanggal' => 'nullable|date|before_or_equal:today',
                 'kegiatan' => 'nullable|string|min:10',
                 'kendala' => 'nullable|string|min:5',
                 'file' => 'nullable|image|mimes:jpeg,jpg,png|max:2048',
-            ], [
-                'tanggal.date' => 'Format tanggal tidak valid',
-                'tanggal.before_or_equal' => 'Tanggal tidak boleh melebihi hari ini',
-                'kegiatan.min' => 'Kegiatan minimal 10 karakter',
-                'kendala.min' => 'Kendala minimal 5 karakter',
-                'file.image' => 'File harus berupa gambar',
-                'file.mimes' => 'File harus berformat JPEG, JPG, atau PNG',
-                'file.max' => 'Ukuran file maksimal 2MB',
             ]);
 
             if ($validator->fails()) {
@@ -375,24 +448,13 @@ class LogbookSiswaController extends Controller
                 ], 422);
             }
 
-            // ✅ PERBAIKAN: Hanya update field yang dikirim
             $updateData = [];
 
-            if ($request->has('tanggal')) {
-                $updateData['tanggal'] = $request->tanggal;
-            }
+            if ($request->has('tanggal')) $updateData['tanggal'] = $request->tanggal;
+            if ($request->has('kegiatan')) $updateData['kegiatan'] = trim($request->kegiatan);
+            if ($request->has('kendala')) $updateData['kendala'] = trim($request->kendala);
 
-            if ($request->has('kegiatan')) {
-                $updateData['kegiatan'] = trim($request->kegiatan);
-            }
-
-            if ($request->has('kendala')) {
-                $updateData['kendala'] = trim($request->kendala);
-            }
-
-            // Handle upload file baru
             if ($request->hasFile('file')) {
-                // Hapus file lama jika ada
                 if ($logbook->file && Storage::disk('public')->exists($logbook->file)) {
                     Storage::disk('public')->delete($logbook->file);
                 }
@@ -403,18 +465,17 @@ class LogbookSiswaController extends Controller
                 $updateData['file'] = $filePath;
             }
 
-            // Update hanya field yang ada
             if (!empty($updateData)) {
                 $logbook->update($updateData);
             }
 
-            // Reload dengan relasi
-            $logbook->load('magang.siswa.user', 'magang.dudi');
+            $this->clearSiswaCache($siswa->id);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Logbook berhasil diupdate',
-                'data' => $logbook
+                'data' => $logbook,
+                'cache_cleared' => true
             ], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -425,26 +486,28 @@ class LogbookSiswaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengupdate logbook',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'error' => $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Hapus logbook (hanya jika status masih pending)
-     */
     public function destroy($id)
     {
         try {
-            $siswa = Auth::user()->siswa;
+            $siswa = $this->getSiswa();
 
-            // Cari logbook milik siswa
+            if (!$siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data siswa tidak ditemukan'
+                ], 404);
+            }
+
             $logbook = Logbook::whereHas('magang', function ($query) use ($siswa) {
                 $query->where('siswa_id', $siswa->id);
             })
                 ->findOrFail($id);
 
-            // Cek apakah logbook masih bisa dihapus (hanya yang pending)
             if ($logbook->status_verifikasi !== 'pending') {
                 return response()->json([
                     'success' => false,
@@ -452,22 +515,45 @@ class LogbookSiswaController extends Controller
                 ], 403);
             }
 
-            // Hapus file jika ada
             if ($logbook->file && Storage::disk('public')->exists($logbook->file)) {
                 Storage::disk('public')->delete($logbook->file);
             }
 
             $logbook->delete();
+            $this->clearSiswaCache($siswa->id);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Logbook berhasil dihapus'
+                'message' => 'Logbook berhasil dihapus',
+                'cache_cleared' => true
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menghapus logbook',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function clearCache()
+    {
+        try {
+            $siswa = $this->getSiswa();
+            $siswaId = $siswa ? $siswa->id : null;
+
+            $cleared = $this->clearSiswaCache($siswaId);
+
+            return response()->json([
+                'success' => $cleared,
+                'message' => $cleared ? 'Cache logbook berhasil dibersihkan' : 'Gagal membersihkan cache',
+                'timestamp' => now()->toDateTimeString()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to clear cache manually', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error membersihkan cache: ' . $e->getMessage()
             ], 500);
         }
     }

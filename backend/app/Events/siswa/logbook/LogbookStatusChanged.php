@@ -12,19 +12,17 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\Logbook;
 use App\Models\Siswa;
 
-class LogbookCreated implements ShouldBroadcast
+class LogbookStatusChanged implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public $logbook;
     public $siswa;
-    public $action = 'created';
+    public $oldStatus;
+    public $newStatus;
     public $timestamp;
 
-    /**
-     * Create a new event instance.
-     */
-    public function __construct(Logbook $logbook, Siswa $siswa)
+    public function __construct(Logbook $logbook, Siswa $siswa, string $oldStatus, string $newStatus)
     {
         $this->logbook = [
             'id' => $logbook->id,
@@ -32,7 +30,7 @@ class LogbookCreated implements ShouldBroadcast
             'tanggal_formatted' => $logbook->tanggal->format('d M Y'),
             'kegiatan' => $logbook->kegiatan,
             'status_verifikasi' => $logbook->status_verifikasi,
-            'created_at' => $logbook->created_at->toDateTimeString(),
+            'catatan_guru' => $logbook->catatan_guru,
         ];
 
         $this->siswa = [
@@ -41,45 +39,45 @@ class LogbookCreated implements ShouldBroadcast
             'nis' => $siswa->nis,
         ];
 
+        $this->oldStatus = $oldStatus;
+        $this->newStatus = $newStatus;
         $this->timestamp = now()->toDateTimeString();
     }
 
-    /**
-     * Get the channels the event should broadcast on.
-     *
-     * @return array<int, \Illuminate\Broadcasting\Channel>
-     */
     public function broadcastOn(): array
     {
-        // Hanya siswa yang membuat logbook yang menerima notifikasi
         return [
             new PrivateChannel('siswa.logbook.' . $this->siswa['id']),
-            new PrivateChannel('siswa.user.' . $siswa->user_id), // Jika ada user_id di siswa
         ];
     }
 
-    /**
-     * Nama event untuk broadcasting
-     */
     public function broadcastAs(): string
     {
-        return 'logbook.created';
+        return 'logbook.status.changed';
     }
 
-    /**
-     * Data yang akan dibroadcast
-     */
     public function broadcastWith(): array
     {
+        $statusMessages = [
+            'pending' => 'menunggu verifikasi',
+            'disetujui' => 'disetujui',
+            'ditolak' => 'ditolak',
+        ];
+
+        $icon = $this->newStatus == 'disetujui' ? 'success' : ($this->newStatus == 'ditolak' ? 'error' : 'info');
+
+        $title = $this->newStatus == 'disetujui' ? 'Logbook Disetujui' : ($this->newStatus == 'ditolak' ? 'Logbook Ditolak' : 'Status Logbook Berubah');
+
         return [
-            'type' => 'logbook_created',
-            'title' => 'Logbook Berhasil Dibuat',
-            'message' => "Logbook untuk tanggal {$this->logbook['tanggal_formatted']} berhasil disimpan",
+            'type' => 'logbook_status_changed',
+            'title' => $title,
+            'message' => "Logbook tanggal {$this->logbook['tanggal_formatted']} telah {$statusMessages[$this->newStatus]}",
             'data' => $this->logbook,
             'siswa' => $this->siswa,
-            'action' => $this->action,
+            'old_status' => $this->oldStatus,
+            'new_status' => $this->newStatus,
             'timestamp' => $this->timestamp,
-            'icon' => 'success',
+            'icon' => $icon,
         ];
     }
 }
