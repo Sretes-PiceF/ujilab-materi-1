@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { User, Mail, Lock, AlertCircle, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,46 @@ export default function LoginPage() {
   const [showError, setShowError] = useState(false);
   const [captchaToken, setCaptchaToken] = useState("");
   const recaptchaRef = useRef<ReCAPTCHA>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token") || 
+                  document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
+    
+    if (token) {
+      let userData = null;
+      
+      try {
+        const userFromLocalStorage = localStorage.getItem("user");
+        if (userFromLocalStorage) {
+          userData = JSON.parse(userFromLocalStorage);
+        }
+      } catch (e) {
+        console.log("Error parsing user from localStorage:", e);
+      }
+      
+      if (!userData) {
+        try {
+          const userDataCookie = document.cookie.split('; ').find(row => row.startsWith('user_data='));
+          if (userDataCookie) {
+            const encodedUserData = userDataCookie.split('=')[1];
+            if (encodedUserData) {
+              userData = JSON.parse(decodeURIComponent(encodedUserData));
+            }
+          }
+        } catch (error) {
+          console.log("Error parsing user data from cookie:", error);
+        }
+      }
+      
+      if (userData?.role) {
+        if (userData.role === 'siswa') {
+          router.push('/siswa/dashboard');
+        } else if (userData.role === 'guru') {
+          router.push('/guru/dashboard');
+        }
+      }
+    }
+  }, [router]);
 
   const handleCloseError = () => {
     setShowError(false);
@@ -52,37 +92,44 @@ export default function LoginPage() {
         throw new Error("Terjadi kesalahan pada sistem. Silakan coba lagi.");
       }
 
-      // Simpan ke localStorage
       localStorage.setItem("access_token", token);
       localStorage.setItem("user", JSON.stringify(user));
 
-      // Encode user data untuk cookie
+      sessionStorage.setItem("access_token", token);
+      sessionStorage.setItem("user", JSON.stringify(user));
+
       const encodedUser = encodeURIComponent(JSON.stringify(user));
 
-      // Set cookie
-      document.cookie = `access_token=${token}; path=/; max-age=86400; SameSite=Lax`;
-      document.cookie = `user_data=${encodedUser}; path=/; max-age=86400; SameSite=Lax`;
+      const cookieOptions = `path=/; max-age=86400; SameSite=Lax`;
+      const secureOption = window.location.protocol === 'https:' ? '; Secure' : '';
+      
+      document.cookie = `access_token=${token}; ${cookieOptions}${secureOption}`;
+      document.cookie = `user_data=${encodedUser}; ${cookieOptions}${secureOption}`;
+      
+      document.cookie = `access_token=${token}; path=/siswa; max-age=86400; SameSite=Lax`;
+      document.cookie = `user_data=${encodedUser}; path=/siswa; max-age=86400; SameSite=Lax`;
+      
+      document.cookie = `access_token=${token}; path=/guru; max-age=86400; SameSite=Lax`;
+      document.cookie = `user_data=${encodedUser}; path=/guru; max-age=86400; SameSite=Lax`;
+      
+      document.cookie = `token=${token}; path=/; max-age=86400; SameSite=Lax`;
 
-      // Tunggu cookie ter-set
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Redirect berdasarkan role
       if (user.role === "guru") {
-        router.push("/guru/dashboard");
+        window.location.href = "/guru/dashboard";
       } else if (user.role === "siswa") {
-        router.push("/siswa/dashboard");
+        window.location.href = "/siswa/dashboard";
       } else {
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
       }
 
-      router.refresh();
     } catch (error: any) {
       const message =
         error.message || "Login gagal, periksa kembali email atau password.";
       setErrorMsg(message);
       setShowError(true);
 
-      // Auto-hide error setelah 6 detik
       setTimeout(() => {
         setShowError(false);
       }, 6000);
@@ -92,9 +139,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-200 to-white flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-200 to-white flex items-center justify-center p-4 px-3 sm:px-4">
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-lg p-8 space-y-6 relative">
+        <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 space-y-6 relative">
           {/* Logo */}
           <div className="flex justify-center">
             <div className="h-12 w-12 rounded-full bg-blue-500 flex items-center justify-center">
@@ -179,16 +226,19 @@ export default function LoginPage() {
                 />
               </div>
 
-              <div className="w-full pl-10 pr-2 py-5 border-gray-200 rounded-lg transition-all ">
-                <ReCAPTCHA
-                  ref={recaptchaRef}
-                  sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY!}
-                  onChange={(token) => setCaptchaToken(token || "")}
-                  onExpired={() => {
-                    setCaptchaToken("");
-                    recaptchaRef.current?.reset();
-                  }}
-                />
+              {/* reCAPTCHA Container - Responsive & Center */}
+              <div className="mt-5 flex justify-center">
+                <div className="inline-block transform scale-75 origin-center sm:scale-100">
+                  <ReCAPTCHA
+                    ref={recaptchaRef}
+                    sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY!}
+                    onChange={(token) => setCaptchaToken(token || "")}
+                    onExpired={() => {
+                      setCaptchaToken("");
+                      recaptchaRef.current?.reset();
+                    }}
+                  />
+                </div>
               </div>
             </div>
 

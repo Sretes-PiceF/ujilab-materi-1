@@ -1,3 +1,4 @@
+// middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -12,7 +13,7 @@ export function middleware(req: NextRequest) {
   console.log("TOKEN      :", token ? "(ADA)" : "(TIDAK ADA)");
   console.log("USER RAW   :", userDataRaw ? userDataRaw.substring(0, 50) + "..." : "(null)");
 
-  //  FIX: DECODE USER DATA
+  // Decode user data
   let user = null;
   try {
     if (userDataRaw) {
@@ -30,14 +31,31 @@ export function middleware(req: NextRequest) {
 
   const isAuthRoute = pathname.startsWith("/siswa") || pathname.startsWith("/guru");
   const isLoginPage = pathname === "/";
+  
+  // Buat response
+  const response = NextResponse.next();
+  
+  // Tambahkan header untuk mencegah caching di browser
+  response.headers.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+  response.headers.set('X-Accel-Expires', '0');
 
-  //  Proteksi halaman siswa & guru
+  // Proteksi halaman siswa & guru
   if (isAuthRoute) {
     console.log(" AUTH ROUTE TERDETEKSI:", pathname);
 
     if (!token || !user) {
       console.log(" BLOKIR — token/user tidak ada, redirect ke /");
-      return NextResponse.redirect(new URL("/", req.url));
+      
+      // Hapus cookies sebelum redirect
+      const redirectUrl = new URL("/", req.url);
+      
+      // Tambahkan parameter untuk memastikan tidak cache
+      redirectUrl.searchParams.set('logout', 'true');
+      redirectUrl.searchParams.set('t', Date.now().toString());
+      
+      return NextResponse.redirect(redirectUrl);
     }
 
     // Role check untuk siswa
@@ -71,9 +89,9 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|logout).*)"],
 };

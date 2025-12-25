@@ -7,18 +7,17 @@ import { NavigationItem } from "../../../types/types";
 
 interface SidebarNavProps {
   items: NavigationItem[];
+  isLoggingOut?: boolean;
 }
 
 const normalizePath = (path: string) => path.replace(/\/$/, "");
 
-export function SidebarNav({ items }: SidebarNavProps) {
+export function SidebarNav({ items, isLoggingOut = false }: SidebarNavProps) {
   const rawPath = usePathname();
   const currentPath = normalizePath(rawPath);
 
   return (
     <nav className="space-y-1 px-3">
-      {" "}
-      {/* <- Kurangi padding agar lebih rapat */}
       {items.map((item, index) => {
         if (item.isSection) {
           return (
@@ -33,7 +32,14 @@ export function SidebarNav({ items }: SidebarNavProps) {
         const itemHref = normalizePath(item.href);
         const isActive = currentPath === itemHref;
 
-        return <SidebarNavItem key={index} item={item} isActive={isActive} />;
+        return (
+          <SidebarNavItem 
+            key={index} 
+            item={item} 
+            isActive={isActive} 
+            isLoggingOut={isLoggingOut}
+          />
+        );
       })}
     </nav>
   );
